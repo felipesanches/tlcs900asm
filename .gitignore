@@ -1,0 +1,14 @@
+# Build artifacts
+obj/
+*.o
+tlcs900asm
+
+# Editor files
+*.swp
+*~
+.vscode/
+.idea/
+
+# Test files
+*.rom
+*.p
