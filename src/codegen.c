@@ -478,7 +478,8 @@ static bool encode_jr(Assembler *as, Operand *ops, int count) {
 
     int64_t offset = target->value - (as->pc + 2);
 
-    if (offset >= -128 && offset <= 127) {
+    /* On pass 1, emit bytes even if offset unknown (forward reference) */
+    if (as->pass == 1 || (offset >= -128 && offset <= 127)) {
         emit_byte(as, 0x60 + get_cc_code(cc));
         emit_byte(as, (uint8_t)offset);
     } else {
@@ -802,6 +803,46 @@ static bool encode_lda(Assembler *as, Operand *ops, int count) {
         return true;
     }
 
+    /* LDA xrr, imm - treat immediate as direct address */
+    if (src->mode == ADDR_IMMEDIATE) {
+        /* Encode as LDA xrr, (imm) */
+        Operand direct_op = *src;
+        direct_op.mode = ADDR_DIRECT;
+        emit_byte(as, 0xF5);
+        emit_mem_operand(as, &direct_op);
+        emit_byte(as, 0x30 + dcode);
+        return true;
+    }
+
+    /* LDA xrr, xrr + offset (without parentheses) - treat as indexed */
+    if (src->mode == ADDR_REGISTER && src->size == SIZE_LONG && count >= 3) {
+        /* Check if there's an offset operand */
+        if (ops[2].mode == ADDR_IMMEDIATE) {
+            Operand indexed_op;
+            indexed_op.mode = ADDR_INDEXED;
+            indexed_op.reg = src->reg;
+            indexed_op.size = src->size;
+            indexed_op.value = ops[2].value;
+            indexed_op.value_known = ops[2].value_known;
+            emit_byte(as, 0xF5);
+            emit_mem_operand(as, &indexed_op);
+            emit_byte(as, 0x30 + dcode);
+            return true;
+        }
+    }
+
+    /* LDA xrr, xrr (treat register as base for indirect) */
+    if (src->mode == ADDR_REGISTER && src->size == SIZE_LONG) {
+        Operand indirect_op;
+        indirect_op.mode = ADDR_REGISTER_IND;
+        indirect_op.reg = src->reg;
+        indirect_op.size = src->size;
+        emit_byte(as, 0xF5);
+        emit_mem_operand(as, &indirect_op);
+        emit_byte(as, 0x30 + dcode);
+        return true;
+    }
+
     error(as, "unsupported LDA operand combination");
     return false;
 }
@@ -861,6 +902,55 @@ static bool encode_lddrw(Assembler *as, Operand *ops, int count) {
     emit_byte(as, 0x95);
     emit_byte(as, 0x13);
     return true;
+}
+
+/* LDW - Load word (word-size LD variant) */
+static bool encode_ldw(Assembler *as, Operand *ops, int count) {
+    if (count < 2) {
+        error(as, "LDW requires two operands");
+        return false;
+    }
+
+    Operand *dst = &ops[0];
+    Operand *src = &ops[1];
+
+    /* LDW (mem), imm16 */
+    if ((dst->mode == ADDR_DIRECT || dst->mode == ADDR_REGISTER_IND ||
+         dst->mode == ADDR_INDEXED) && src->mode == ADDR_IMMEDIATE) {
+        emit_byte(as, 0x90);
+        emit_mem_operand(as, dst);
+        emit_byte(as, 0x00);
+        emit_word(as, (uint16_t)src->value);
+        return true;
+    }
+
+    /* LDW reg16, (mem) */
+    if (dst->mode == ADDR_REGISTER && dst->size == SIZE_WORD &&
+        (src->mode == ADDR_DIRECT || src->mode == ADDR_REGISTER_IND ||
+         src->mode == ADDR_INDEXED)) {
+        int code = get_reg16_code(dst->reg);
+        if (code >= 0) {
+            emit_byte(as, 0x90);
+            emit_mem_operand(as, src);
+            emit_byte(as, 0x20 + code);
+            return true;
+        }
+    }
+
+    /* LDW (mem), reg16 */
+    if ((dst->mode == ADDR_DIRECT || dst->mode == ADDR_REGISTER_IND ||
+         dst->mode == ADDR_INDEXED) && src->mode == ADDR_REGISTER && src->size == SIZE_WORD) {
+        int code = get_reg16_code(src->reg);
+        if (code >= 0) {
+            emit_byte(as, 0x90);
+            emit_mem_operand(as, dst);
+            emit_byte(as, 0x48 + code);
+            return true;
+        }
+    }
+
+    error(as, "unsupported LDW operand combination");
+    return false;
 }
 
 /* EX - Exchange */
@@ -1279,29 +1369,39 @@ static bool encode_inc(Assembler *as, Operand *ops, int count) {
     }
 
     int inc_val = 1;
-    if (count >= 2 && ops[1].mode == ADDR_IMMEDIATE) {
-        inc_val = (int)ops[1].value;
+    Operand *target = &ops[0];
+
+    /* Handle both "INC reg" and "INC n, reg" syntax */
+    if (count >= 2) {
+        if (ops[0].mode == ADDR_IMMEDIATE && ops[1].mode == ADDR_REGISTER) {
+            /* INC n, reg - increment amount first */
+            inc_val = (int)ops[0].value;
+            target = &ops[1];
+        } else if (ops[1].mode == ADDR_IMMEDIATE) {
+            /* INC reg, n - register first */
+            inc_val = (int)ops[1].value;
+        }
     }
 
-    if (ops[0].mode == ADDR_REGISTER) {
-        if (ops[0].size == SIZE_BYTE) {
-            int code = get_reg8_code(ops[0].reg);
+    if (target->mode == ADDR_REGISTER) {
+        if (target->size == SIZE_BYTE) {
+            int code = get_reg8_code(target->reg);
             if (code >= 0) {
                 emit_byte(as, 0xC8 + (code >> 1));
                 emit_byte(as, 0x60 + (code & 1));
                 emit_byte(as, (uint8_t)inc_val);
                 return true;
             }
-        } else if (ops[0].size == SIZE_WORD) {
-            int code = get_reg16_code(ops[0].reg);
+        } else if (target->size == SIZE_WORD) {
+            int code = get_reg16_code(target->reg);
             if (code >= 0) {
                 emit_byte(as, 0xD8 + code);
                 emit_byte(as, 0x60);
                 emit_byte(as, (uint8_t)inc_val);
                 return true;
             }
-        } else if (ops[0].size == SIZE_LONG) {
-            int code = get_reg32_code(ops[0].reg);
+        } else if (target->size == SIZE_LONG) {
+            int code = get_reg32_code(target->reg);
             if (code >= 0) {
                 emit_byte(as, 0xE8 + code);
                 emit_byte(as, 0x60);
@@ -1312,10 +1412,10 @@ static bool encode_inc(Assembler *as, Operand *ops, int count) {
     }
 
     /* INC (mem) */
-    if (ops[0].mode == ADDR_REGISTER_IND || ops[0].mode == ADDR_INDEXED ||
-        ops[0].mode == ADDR_DIRECT) {
+    if (target->mode == ADDR_REGISTER_IND || target->mode == ADDR_INDEXED ||
+        target->mode == ADDR_DIRECT) {
         emit_byte(as, 0x80);
-        emit_mem_operand(as, &ops[0]);
+        emit_mem_operand(as, target);
         emit_byte(as, 0x60);
         emit_byte(as, (uint8_t)inc_val);
         return true;
@@ -1333,29 +1433,39 @@ static bool encode_dec(Assembler *as, Operand *ops, int count) {
     }
 
     int dec_val = 1;
-    if (count >= 2 && ops[1].mode == ADDR_IMMEDIATE) {
-        dec_val = (int)ops[1].value;
+    Operand *target = &ops[0];
+
+    /* Handle both "DEC reg" and "DEC n, reg" syntax */
+    if (count >= 2) {
+        if (ops[0].mode == ADDR_IMMEDIATE && ops[1].mode == ADDR_REGISTER) {
+            /* DEC n, reg - decrement amount first */
+            dec_val = (int)ops[0].value;
+            target = &ops[1];
+        } else if (ops[1].mode == ADDR_IMMEDIATE) {
+            /* DEC reg, n - register first */
+            dec_val = (int)ops[1].value;
+        }
     }
 
-    if (ops[0].mode == ADDR_REGISTER) {
-        if (ops[0].size == SIZE_BYTE) {
-            int code = get_reg8_code(ops[0].reg);
+    if (target->mode == ADDR_REGISTER) {
+        if (target->size == SIZE_BYTE) {
+            int code = get_reg8_code(target->reg);
             if (code >= 0) {
                 emit_byte(as, 0xC8 + (code >> 1));
                 emit_byte(as, 0x68 + (code & 1));
                 emit_byte(as, (uint8_t)dec_val);
                 return true;
             }
-        } else if (ops[0].size == SIZE_WORD) {
-            int code = get_reg16_code(ops[0].reg);
+        } else if (target->size == SIZE_WORD) {
+            int code = get_reg16_code(target->reg);
             if (code >= 0) {
                 emit_byte(as, 0xD8 + code);
                 emit_byte(as, 0x68);
                 emit_byte(as, (uint8_t)dec_val);
                 return true;
             }
-        } else if (ops[0].size == SIZE_LONG) {
-            int code = get_reg32_code(ops[0].reg);
+        } else if (target->size == SIZE_LONG) {
+            int code = get_reg32_code(target->reg);
             if (code >= 0) {
                 emit_byte(as, 0xE8 + code);
                 emit_byte(as, 0x68);
@@ -1366,10 +1476,10 @@ static bool encode_dec(Assembler *as, Operand *ops, int count) {
     }
 
     /* DEC (mem) */
-    if (ops[0].mode == ADDR_REGISTER_IND || ops[0].mode == ADDR_INDEXED ||
-        ops[0].mode == ADDR_DIRECT) {
+    if (target->mode == ADDR_REGISTER_IND || target->mode == ADDR_INDEXED ||
+        target->mode == ADDR_DIRECT) {
         emit_byte(as, 0x80);
-        emit_mem_operand(as, &ops[0]);
+        emit_mem_operand(as, target);
         emit_byte(as, 0x68);
         emit_byte(as, (uint8_t)dec_val);
         return true;
@@ -1944,6 +2054,15 @@ static bool encode_bit(Assembler *as, Operand *ops, int count) {
         }
     }
 
+    /* BIT n, (mem) */
+    if (ops[1].mode == ADDR_DIRECT || ops[1].mode == ADDR_REGISTER_IND ||
+        ops[1].mode == ADDR_INDEXED) {
+        emit_byte(as, 0xB0);
+        emit_mem_operand(as, &ops[1]);
+        emit_byte(as, 0xC0 + bit);
+        return true;
+    }
+
     error(as, "unsupported BIT operand");
     return false;
 }
@@ -1969,6 +2088,15 @@ static bool encode_set(Assembler *as, Operand *ops, int count) {
         }
     }
 
+    /* SET n, (mem) */
+    if (ops[1].mode == ADDR_DIRECT || ops[1].mode == ADDR_REGISTER_IND ||
+        ops[1].mode == ADDR_INDEXED) {
+        emit_byte(as, 0xB0);
+        emit_mem_operand(as, &ops[1]);
+        emit_byte(as, 0xA0 + bit);
+        return true;
+    }
+
     error(as, "unsupported SET operand");
     return false;
 }
@@ -1992,6 +2120,15 @@ static bool encode_res(Assembler *as, Operand *ops, int count) {
                 return true;
             }
         }
+    }
+
+    /* RES n, (mem) */
+    if (ops[1].mode == ADDR_DIRECT || ops[1].mode == ADDR_REGISTER_IND ||
+        ops[1].mode == ADDR_INDEXED) {
+        emit_byte(as, 0xB0);
+        emit_mem_operand(as, &ops[1]);
+        emit_byte(as, 0xB0 + bit);
+        return true;
     }
 
     error(as, "unsupported RES operand");
@@ -2181,6 +2318,7 @@ static const struct {
     {"LDIW", encode_ldiw},
     {"LDIRW", encode_ldirw},
     {"LDDRW", encode_lddrw},
+    {"LDW", encode_ldw},
     {"EX", encode_ex},
 
     /* Arithmetic */

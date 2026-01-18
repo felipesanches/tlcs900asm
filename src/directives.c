@@ -103,7 +103,7 @@ static bool handle_equ(Assembler *as, const char *label) {
 /* Handle SET directive (reassignable) */
 static bool handle_set(Assembler *as, const char *label) {
     if (!label || !label[0]) {
-        error(as, "SET requires a label");
+        /* No label - this might be the SET instruction, not directive */
         return false;
     }
     int64_t value;
@@ -362,24 +362,46 @@ static bool handle_binclude(Assembler *as) {
 
 /* Handle CPU directive */
 static bool handle_cpu(Assembler *as) {
-    Token tok = lexer_next();
-    if (tok.type != TOK_IDENTIFIER) {
+    /* Collect CPU name - might be identifier or number (e.g., 96c141) */
+    char cpu_name[64] = "";
+    int pos = 0;
+    Token tok = lexer_peek();
+
+    while (tok.type != TOK_NEWLINE && tok.type != TOK_EOF &&
+           tok.type != TOK_COMMA && pos < (int)sizeof(cpu_name) - 1) {
+        if (tok.type == TOK_IDENTIFIER || tok.type == TOK_NUMBER) {
+            size_t len = strlen(tok.text);
+            if (pos + len < sizeof(cpu_name) - 1) {
+                strcpy(cpu_name + pos, tok.text);
+                pos += len;
+            }
+        }
+        lexer_next();
+        tok = lexer_peek();
+    }
+    cpu_name[pos] = '\0';
+
+    if (!cpu_name[0]) {
         error(as, "CPU requires a processor name");
         return false;
     }
 
     /* Accept various TLCS-900 variants */
-    if (strcasecmp(tok.text, "TLCS900") == 0 ||
-        strcasecmp(tok.text, "TMP94C241") == 0 ||
-        strcasecmp(tok.text, "TLCS-900") == 0 ||
-        strcasecmp(tok.text, "TLCS900H") == 0 ||
-        strcasecmp(tok.text, "TLCS900/H") == 0 ||
-        strncasecmp(tok.text, "900", 3) == 0) {
-        /* OK */
+    if (strcasecmp(cpu_name, "TLCS900") == 0 ||
+        strcasecmp(cpu_name, "TMP94C241") == 0 ||
+        strcasecmp(cpu_name, "TLCS-900") == 0 ||
+        strcasecmp(cpu_name, "TLCS900H") == 0 ||
+        strcasecmp(cpu_name, "TLCS900/H") == 0 ||
+        strcasecmp(cpu_name, "96c141") == 0 ||
+        strcasecmp(cpu_name, "94c241") == 0 ||
+        strncasecmp(cpu_name, "900", 3) == 0 ||
+        strncasecmp(cpu_name, "96", 2) == 0 ||
+        strncasecmp(cpu_name, "94", 2) == 0) {
+        /* OK - TLCS-900 family CPU */
         return true;
     }
 
-    warning(as, "unknown CPU '%s', assuming TLCS-900", tok.text);
+    warning(as, "unknown CPU '%s', assuming TLCS-900", cpu_name);
     return true;
 }
 
