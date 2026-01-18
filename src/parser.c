@@ -20,6 +20,11 @@
 extern bool handle_directive(Assembler *as, const char *directive, const char *label);
 extern bool encode_instruction(Assembler *as, const char *mnemonic, Operand *operands, int operand_count);
 
+/* Macro functions */
+extern bool macro_is_collecting(void);
+extern bool macro_add_line(const char *line);
+extern bool macro_try_expand(Assembler *as, const char *name, const char *args_str);
+
 /* Forward declarations */
 static bool is_register(const char *name, RegisterType *reg, OperandSize *size);
 static bool is_condition(const char *name, ConditionCode *cc);
@@ -313,6 +318,28 @@ bool parse_line(Assembler *as, const char *line) {
         return true;
     }
 
+    /* If collecting a macro definition, add lines to it */
+    if (macro_is_collecting()) {
+        /* Check for ENDM first */
+        const char *check = p;
+        while (*check == ' ' || *check == '\t') check++;
+        if (strncasecmp(check, "ENDM", 4) == 0) {
+            char c = check[4];
+            if (c == '\0' || c == ' ' || c == '\t' || c == '\n' || c == ';') {
+                /* End of macro - process through normal path */
+                /* Fall through to normal parsing */
+            } else {
+                /* Part of macro body */
+                macro_add_line(line);
+                return true;
+            }
+        } else {
+            /* Add to macro body */
+            macro_add_line(line);
+            return true;
+        }
+    }
+
     /* Initialize lexer with this line */
     lexer_init(line);
     lexer_set_line(as->current_line);
@@ -331,10 +358,24 @@ bool parse_line(Assembler *as, const char *line) {
             lexer_next();  /* consume colon */
             tok = lexer_next();  /* get next token */
         } else if (line[0] != ' ' && line[0] != '\t') {
-            /* Label at column 1 (no colon) - some assemblers support this */
-            /* But we need to check if it looks like a mnemonic or directive first */
-            /* For now, require colon for labels */
-            strncpy(mnemonic, tok.text, MAX_IDENTIFIER - 1);
+            /* Identifier at column 1 without colon */
+            /* Check if next token is MACRO, EQU, SET, = (label-requiring directives) */
+            if (next.type == TOK_IDENTIFIER &&
+                (strcasecmp(next.text, "MACRO") == 0 ||
+                 strcasecmp(next.text, "EQU") == 0 ||
+                 strcasecmp(next.text, "SET") == 0)) {
+                /* This is a label followed by a directive */
+                strncpy(label, tok.text, MAX_IDENTIFIER - 1);
+                tok = lexer_next();  /* get the directive */
+                strncpy(mnemonic, tok.text, MAX_IDENTIFIER - 1);
+            } else if (next.type == TOK_EQUALS) {
+                /* label = value syntax */
+                strncpy(label, tok.text, MAX_IDENTIFIER - 1);
+                tok = lexer_next();  /* get the = */
+            } else {
+                /* Treat as mnemonic */
+                strncpy(mnemonic, tok.text, MAX_IDENTIFIER - 1);
+            }
         } else {
             strncpy(mnemonic, tok.text, MAX_IDENTIFIER - 1);
         }
@@ -359,14 +400,14 @@ bool parse_line(Assembler *as, const char *line) {
         return true;
     }
 
-    /* Define label if present */
-    if (label[0]) {
-        symbol_define(as, label, SYM_LABEL, as->pc);
-    }
-
-    /* Check for directive */
+    /* Check for directive first (MACRO, EQU, SET handle their own symbol definition) */
     if (mnemonic[0] && handle_directive(as, mnemonic, label)) {
         return true;
+    }
+
+    /* Define label if present (and not handled by a directive) */
+    if (label[0]) {
+        symbol_define(as, label, SYM_LABEL, as->pc);
     }
 
     /* Check for = (alternate EQU syntax) */
@@ -417,6 +458,50 @@ bool parse_line(Assembler *as, const char *line) {
         }
     }
 
-    /* Encode the instruction */
-    return encode_instruction(as, mnemonic, operands, operand_count);
+    /* Try to encode as an instruction first */
+    if (encode_instruction(as, mnemonic, operands, operand_count)) {
+        return true;
+    }
+
+    /* Not a known instruction - try macro expansion */
+    /* Build the argument string from the rest of the line */
+    char args_str[MAX_LINE_LENGTH] = "";
+    int args_pos = 0;
+    for (int i = 0; i < operand_count; i++) {
+        if (i > 0 && args_pos < (int)sizeof(args_str) - 2) {
+            args_str[args_pos++] = ',';
+            args_str[args_pos++] = ' ';
+        }
+        /* Reconstruct operand as string (simplified) */
+        char op_str[256] = "";
+        if (operands[i].mode == ADDR_IMMEDIATE) {
+            if (operands[i].value_known) {
+                snprintf(op_str, sizeof(op_str), "%ld", (long)operands[i].value);
+            } else if (operands[i].symbol[0]) {
+                strncpy(op_str, operands[i].symbol, sizeof(op_str) - 1);
+            }
+        } else if (operands[i].mode == ADDR_REGISTER) {
+            /* Get register name from code */
+            for (int j = 0; register_table[j].name; j++) {
+                if (register_table[j].reg == operands[i].reg) {
+                    strncpy(op_str, register_table[j].name, sizeof(op_str) - 1);
+                    break;
+                }
+            }
+        }
+        size_t len = strlen(op_str);
+        if (args_pos + len < sizeof(args_str) - 1) {
+            strcpy(args_str + args_pos, op_str);
+            args_pos += len;
+        }
+    }
+    args_str[args_pos] = '\0';
+
+    if (macro_try_expand(as, mnemonic, args_str)) {
+        return true;
+    }
+
+    /* Nothing worked - this is an unknown instruction/macro */
+    error(as, "unknown instruction or macro: %s", mnemonic);
+    return false;
 }

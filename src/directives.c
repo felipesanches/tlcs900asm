@@ -27,6 +27,11 @@ extern void emit_fill(Assembler *as, size_t count, uint8_t value);
 extern void emit_string(Assembler *as, const char *str, size_t len);
 extern void emit_word24(Assembler *as, uint32_t w);
 
+/* Macro functions */
+extern bool macro_start_definition(Assembler *as, const char *name, const char *params_str);
+extern bool macro_end_definition(Assembler *as);
+extern bool macro_is_collecting(void);
+
 /* Check if a string matches a directive (case-insensitive) */
 static bool is_directive(const char *s, const char *directive) {
     return strcasecmp(s, directive) == 0;
@@ -415,6 +420,39 @@ static bool handle_page(Assembler *as) {
     return true;
 }
 
+/* Handle MACRO directive (label MACRO params) */
+static bool handle_macro(Assembler *as, const char *label) {
+    if (!label || !label[0]) {
+        error(as, "MACRO requires a name (label)");
+        return false;
+    }
+
+    /* Collect the rest of the line as parameter list */
+    char params[MAX_LINE_LENGTH] = "";
+    int pos = 0;
+    Token tok = lexer_peek();
+    while (tok.type != TOK_NEWLINE && tok.type != TOK_EOF) {
+        if (pos > 0 && pos < (int)sizeof(params) - 1) {
+            params[pos++] = ' ';
+        }
+        size_t len = strlen(tok.text);
+        if (pos + len < sizeof(params) - 1) {
+            strcpy(params + pos, tok.text);
+            pos += len;
+        }
+        lexer_next();
+        tok = lexer_peek();
+    }
+    params[pos] = '\0';
+
+    return macro_start_definition(as, label, params);
+}
+
+/* Handle ENDM directive */
+static bool handle_endm(Assembler *as) {
+    return macro_end_definition(as);
+}
+
 /* Check and handle a directive, return true if it was a directive */
 bool handle_directive(Assembler *as, const char *directive, const char *label) {
     if (is_directive(directive, "ORG")) {
@@ -474,6 +512,12 @@ bool handle_directive(Assembler *as, const char *directive, const char *label) {
             lexer_next();
         }
         return true;
+    }
+    if (is_directive(directive, "MACRO")) {
+        return handle_macro(as, label);
+    }
+    if (is_directive(directive, "ENDM")) {
+        return handle_endm(as);
     }
 
     return false;  /* Not a directive */

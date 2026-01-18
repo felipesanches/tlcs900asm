@@ -2238,7 +2238,6 @@ bool encode_instruction(Assembler *as, const char *mnemonic, Operand *operands, 
         }
     }
 
-    /* Check if it might be a macro call - for now, error */
-    error(as, "unknown instruction '%s'", mnemonic);
+    /* Not found - might be a macro, let caller handle it */
     return false;
 }
