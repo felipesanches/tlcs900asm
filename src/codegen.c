@@ -2121,6 +2121,78 @@ static bool encode_or(Assembler *as, Operand *ops, int count) {
     return false;
 }
 
+/* ORW - OR Word (memory) */
+static bool encode_orw(Assembler *as, Operand *ops, int count) {
+    if (count < 2) {
+        error(as, "ORW requires two operands");
+        return false;
+    }
+
+    Operand *dst = &ops[0];
+    Operand *src = &ops[1];
+
+    /* ORW (mem), imm16 */
+    if ((dst->mode == ADDR_DIRECT || dst->mode == ADDR_REGISTER_IND ||
+         dst->mode == ADDR_INDEXED) && src->mode == ADDR_IMMEDIATE) {
+        emit_byte(as, 0x90);  /* Word memory prefix */
+        emit_mem_operand(as, dst);
+        emit_byte(as, 0x2C);  /* OR opcode */
+        emit_word(as, (uint16_t)src->value);
+        return true;
+    }
+
+    error(as, "unsupported ORW operand combination");
+    return false;
+}
+
+/* ANDW - AND Word (memory) */
+static bool encode_andw(Assembler *as, Operand *ops, int count) {
+    if (count < 2) {
+        error(as, "ANDW requires two operands");
+        return false;
+    }
+
+    Operand *dst = &ops[0];
+    Operand *src = &ops[1];
+
+    /* ANDW (mem), imm16 */
+    if ((dst->mode == ADDR_DIRECT || dst->mode == ADDR_REGISTER_IND ||
+         dst->mode == ADDR_INDEXED) && src->mode == ADDR_IMMEDIATE) {
+        emit_byte(as, 0x90);  /* Word memory prefix */
+        emit_mem_operand(as, dst);
+        emit_byte(as, 0x24);  /* AND opcode */
+        emit_word(as, (uint16_t)src->value);
+        return true;
+    }
+
+    error(as, "unsupported ANDW operand combination");
+    return false;
+}
+
+/* ADDW - ADD Word (memory) */
+static bool encode_addw(Assembler *as, Operand *ops, int count) {
+    if (count < 2) {
+        error(as, "ADDW requires two operands");
+        return false;
+    }
+
+    Operand *dst = &ops[0];
+    Operand *src = &ops[1];
+
+    /* ADDW (mem), imm16 */
+    if ((dst->mode == ADDR_DIRECT || dst->mode == ADDR_REGISTER_IND ||
+         dst->mode == ADDR_INDEXED) && src->mode == ADDR_IMMEDIATE) {
+        emit_byte(as, 0x90);  /* Word memory prefix */
+        emit_mem_operand(as, dst);
+        emit_byte(as, 0x08);  /* ADD opcode */
+        emit_word(as, (uint16_t)src->value);
+        return true;
+    }
+
+    error(as, "unsupported ADDW operand combination");
+    return false;
+}
+
 /* XOR */
 static bool encode_xor(Assembler *as, Operand *ops, int count) {
     if (count < 2) {
@@ -2675,9 +2747,12 @@ static const struct {
 
     /* Logical */
     {"AND", encode_and},
+    {"ANDW", encode_andw},
     {"OR", encode_or},
+    {"ORW", encode_orw},
     {"XOR", encode_xor},
     {"CPL", encode_cpl},
+    {"ADDW", encode_addw},
 
     /* Shift/Rotate */
     {"RLC", encode_rlc},
