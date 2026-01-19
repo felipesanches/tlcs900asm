@@ -285,7 +285,31 @@ static bool encode_push(Assembler *as, Operand *ops, int count) {
         }
     }
 
+    /* PUSH #imm (word) */
+    if (ops[0].mode == ADDR_IMMEDIATE) {
+        emit_byte(as, 0x09);  /* PUSH #imm16 */
+        emit_word(as, (uint16_t)ops[0].value);
+        return true;
+    }
+
     error(as, "invalid PUSH operand");
+    return false;
+}
+
+/* PUSHW - Push word immediate */
+static bool encode_pushw(Assembler *as, Operand *ops, int count) {
+    if (count < 1) {
+        error(as, "PUSHW requires an operand");
+        return false;
+    }
+
+    if (ops[0].mode == ADDR_IMMEDIATE) {
+        emit_byte(as, 0x09);  /* PUSH #imm16 */
+        emit_word(as, (uint16_t)ops[0].value);
+        return true;
+    }
+
+    error(as, "invalid PUSHW operand");
     return false;
 }
 
@@ -1418,7 +1442,41 @@ static bool encode_cp(Assembler *as, Operand *ops, int count) {
         }
     }
 
+    /* CP (mem), imm - byte */
+    if ((dst->mode == ADDR_REGISTER_IND || dst->mode == ADDR_INDEXED ||
+         dst->mode == ADDR_DIRECT) && src->mode == ADDR_IMMEDIATE) {
+        emit_byte(as, 0x80);  /* Byte memory prefix */
+        emit_mem_operand(as, dst);
+        emit_byte(as, 0x38);  /* CP (mem), imm opcode */
+        emit_byte(as, (uint8_t)src->value);
+        return true;
+    }
+
     error(as, "unsupported CP operand combination");
+    return false;
+}
+
+/* CPW - Compare Word (for word-sized memory comparisons) */
+static bool encode_cpw(Assembler *as, Operand *ops, int count) {
+    if (count < 2) {
+        error(as, "CPW requires two operands");
+        return false;
+    }
+
+    Operand *dst = &ops[0];
+    Operand *src = &ops[1];
+
+    /* CPW (mem), imm */
+    if ((dst->mode == ADDR_REGISTER_IND || dst->mode == ADDR_INDEXED ||
+         dst->mode == ADDR_DIRECT) && src->mode == ADDR_IMMEDIATE) {
+        emit_byte(as, 0x90);  /* Word memory prefix */
+        emit_mem_operand(as, dst);
+        emit_byte(as, 0x38);  /* CPW (mem), imm opcode */
+        emit_word(as, (uint16_t)src->value);
+        return true;
+    }
+
+    error(as, "unsupported CPW operand combination");
     return false;
 }
 
@@ -2531,6 +2589,7 @@ static const struct {
 
     /* Stack */
     {"PUSH", encode_push},
+    {"PUSHW", encode_pushw},
     {"POP", encode_pop},
     {"LINK", encode_link},
     {"UNLK", encode_unlk},
@@ -2566,6 +2625,7 @@ static const struct {
     {"SUB", encode_sub},
     {"SBC", encode_sbc},
     {"CP", encode_cp},
+    {"CPW", encode_cpw},
     {"INC", encode_inc},
     {"INCW", encode_incw},
     {"DEC", encode_dec},
