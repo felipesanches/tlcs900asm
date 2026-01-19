@@ -753,7 +753,8 @@ static bool encode_ld(Assembler *as, Operand *ops, int count) {
 
     /* LD (mem), reg */
     if ((dst->mode == ADDR_REGISTER_IND || dst->mode == ADDR_INDEXED ||
-         dst->mode == ADDR_DIRECT || dst->mode == ADDR_REGISTER_IND_DEC) &&
+         dst->mode == ADDR_DIRECT || dst->mode == ADDR_REGISTER_IND_DEC ||
+         dst->mode == ADDR_REGISTER_IND_INC) &&
         src->mode == ADDR_REGISTER) {
 
         if (src->size == SIZE_BYTE) {
@@ -971,6 +972,15 @@ static bool encode_ldw(Assembler *as, Operand *ops, int count) {
             emit_byte(as, 0x48 + code);
             return true;
         }
+    }
+
+    /* LDW (reg+), imm16 - post-increment destination */
+    if (dst->mode == ADDR_REGISTER_IND_INC && src->mode == ADDR_IMMEDIATE) {
+        emit_byte(as, 0x90);
+        emit_mem_operand(as, dst);
+        emit_byte(as, 0x00);
+        emit_word(as, (uint16_t)src->value);
+        return true;
     }
 
     error(as, "unsupported LDW operand combination");
