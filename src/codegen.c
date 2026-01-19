@@ -1849,6 +1849,22 @@ static bool encode_and(Assembler *as, Operand *ops, int count) {
                 emit_byte(as, 0xA0 + ((scode & 1) << 3) + ((dcode >> 1) << 1) + (dcode & 1));
                 return true;
             }
+        } else if (dst->size == SIZE_WORD && src->size == SIZE_WORD) {
+            int dcode = get_reg16_code(dst->reg);
+            int scode = get_reg16_code(src->reg);
+            if (dcode >= 0 && scode >= 0) {
+                emit_byte(as, 0xD8 + scode);
+                emit_byte(as, 0xC0 + dcode);
+                return true;
+            }
+        } else if (dst->size == SIZE_LONG && src->size == SIZE_LONG) {
+            int dcode = get_reg32_code(dst->reg);
+            int scode = get_reg32_code(src->reg);
+            if (dcode >= 0 && scode >= 0) {
+                emit_byte(as, 0xE8 + scode);
+                emit_byte(as, 0xC0 + dcode);
+                return true;
+            }
         }
     }
 
@@ -1914,6 +1930,22 @@ static bool encode_or(Assembler *as, Operand *ops, int count) {
                 emit_byte(as, 0xA8 + ((scode & 1) << 3) + ((dcode >> 1) << 1) + (dcode & 1));
                 return true;
             }
+        } else if (dst->size == SIZE_WORD && src->size == SIZE_WORD) {
+            int dcode = get_reg16_code(dst->reg);
+            int scode = get_reg16_code(src->reg);
+            if (dcode >= 0 && scode >= 0) {
+                emit_byte(as, 0xD8 + scode);
+                emit_byte(as, 0xC8 + dcode);
+                return true;
+            }
+        } else if (dst->size == SIZE_LONG && src->size == SIZE_LONG) {
+            int dcode = get_reg32_code(dst->reg);
+            int scode = get_reg32_code(src->reg);
+            if (dcode >= 0 && scode >= 0) {
+                emit_byte(as, 0xE8 + scode);
+                emit_byte(as, 0xC8 + dcode);
+                return true;
+            }
         }
     }
 
@@ -1977,6 +2009,22 @@ static bool encode_xor(Assembler *as, Operand *ops, int count) {
             if (dcode >= 0 && scode >= 0) {
                 emit_byte(as, 0xC8 + (scode >> 1));
                 emit_byte(as, 0xB8 + ((scode & 1) << 3) + ((dcode >> 1) << 1) + (dcode & 1));
+                return true;
+            }
+        } else if (dst->size == SIZE_WORD && src->size == SIZE_WORD) {
+            int dcode = get_reg16_code(dst->reg);
+            int scode = get_reg16_code(src->reg);
+            if (dcode >= 0 && scode >= 0) {
+                emit_byte(as, 0xD8 + scode);
+                emit_byte(as, 0xD0 + dcode);
+                return true;
+            }
+        } else if (dst->size == SIZE_LONG && src->size == SIZE_LONG) {
+            int dcode = get_reg32_code(dst->reg);
+            int scode = get_reg32_code(src->reg);
+            if (dcode >= 0 && scode >= 0) {
+                emit_byte(as, 0xE8 + scode);
+                emit_byte(as, 0xD0 + dcode);
                 return true;
             }
         }
