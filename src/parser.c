@@ -153,15 +153,29 @@ static bool parse_operand_internal(Assembler *as, Operand *op) {
                         op->size = size;
                         goto check_addr_size;
                     }
-                    /* (reg + offset) - indexed */
-                    int64_t offset;
-                    bool known;
-                    if (!expr_parse(as, &offset, &known)) {
-                        error(as, "invalid indexed offset");
-                        return false;
+                    /* (reg + offset) or (reg + reg) - indexed */
+                    /* Check if the offset is a register */
+                    tok = lexer_peek();
+                    RegisterType idx_reg;
+                    OperandSize idx_size;
+                    if (tok.type == TOK_IDENTIFIER && is_register(tok.text, &idx_reg, &idx_size)) {
+                        /* (reg + reg) - register indexed */
+                        lexer_next();
+                        op->index_reg = idx_reg;
+                        op->value = 0;
+                        op->value_known = true;
+                    } else {
+                        /* (reg + expr) - displacement indexed */
+                        int64_t offset;
+                        bool known;
+                        if (!expr_parse(as, &offset, &known)) {
+                            error(as, "invalid indexed offset");
+                            return false;
+                        }
+                        op->value = offset;
+                        op->value_known = known;
+                        op->index_reg = REG_NONE;
                     }
-                    op->value = offset;
-                    op->value_known = known;
                     tok = lexer_peek();
                     /* Check for :8/:16/:24 size suffix inside parentheses */
                     if (tok.type == TOK_COLON) {
@@ -338,6 +352,39 @@ static bool parse_operand_internal(Assembler *as, Operand *op) {
 
         if (is_reg) {
             lexer_next();
+            /* Check for reg + reg/disp pattern (implicit indexed) */
+            tok = lexer_peek();
+            if (tok.type == TOK_PLUS) {
+                lexer_next();  /* consume + */
+                tok = lexer_peek();
+                /* Check if it's a register */
+                RegisterType idx_reg;
+                OperandSize idx_size;
+                if (tok.type == TOK_IDENTIFIER && is_register(tok.text, &idx_reg, &idx_size)) {
+                    lexer_next();  /* consume index register */
+                    op->mode = ADDR_INDEXED;
+                    op->reg = reg;
+                    op->size = size;
+                    op->index_reg = idx_reg;
+                    op->value = 0;
+                    op->value_known = true;
+                    return true;
+                }
+                /* Otherwise it's reg + displacement */
+                int64_t offset;
+                bool known;
+                if (!expr_parse(as, &offset, &known)) {
+                    error(as, "invalid displacement after register");
+                    return false;
+                }
+                op->mode = ADDR_INDEXED;
+                op->reg = reg;
+                op->size = size;
+                op->value = offset;
+                op->value_known = known;
+                op->index_reg = REG_NONE;
+                return true;
+            }
             op->mode = ADDR_REGISTER;
             op->reg = reg;
             op->size = size;

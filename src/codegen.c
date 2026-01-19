@@ -156,6 +156,21 @@ static bool emit_mem_operand(Assembler *as, Operand *op) {
                 error(as, "invalid register for indexed addressing");
                 return false;
             }
+
+            /* Check for register indexing (XRR + RR) */
+            if (op->index_reg != REG_NONE) {
+                int idx_code = get_reg16_code(op->index_reg);
+                if (idx_code < 0) idx_code = get_reg8_code(op->index_reg);
+                if (idx_code < 0) {
+                    error(as, "invalid index register");
+                    return false;
+                }
+                emit_byte(as, 0x60 + code);  /* Register indexed */
+                emit_byte(as, (uint8_t)idx_code);
+                return true;
+            }
+
+            /* Displacement indexed */
             int disp = (int)op->value;
             if (disp >= -128 && disp <= 127) {
                 emit_byte(as, 0x50 + code);  /* 8-bit displacement */
