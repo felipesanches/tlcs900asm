@@ -19,6 +19,7 @@
 /* External functions */
 extern bool handle_directive(Assembler *as, const char *directive, const char *label);
 extern bool encode_instruction(Assembler *as, const char *mnemonic, Operand *operands, int operand_count);
+extern bool symbol_get_value(Assembler *as, const char *name, int64_t *value);
 
 /* Macro functions */
 extern bool macro_is_collecting(void);
@@ -152,7 +153,11 @@ static bool parse_operand_internal(Assembler *as, Operand *op) {
             RegisterType reg;
             OperandSize size;
 
-            if (is_register(tok.text, &reg, &size)) {
+            /* Check if this identifier is defined as a symbol - if so, treat as address not register */
+            int64_t sym_val;
+            bool is_defined_symbol = symbol_get_value(as, tok.text, &sym_val);
+
+            if (!is_defined_symbol && is_register(tok.text, &reg, &size)) {
                 lexer_next();  /* consume register */
 
                 tok = lexer_peek();
