@@ -25,10 +25,24 @@
 /* Get 8-bit register encoding */
 static int get_reg8_code(RegisterType reg) {
     switch (reg) {
+        /* Current bank */
         case REG_W: return 0; case REG_A: return 1;
         case REG_B: return 2; case REG_C: return 3;
         case REG_D: return 4; case REG_E: return 5;
         case REG_H: return 6; case REG_L: return 7;
+        /* Index register low/high bytes */
+        case REG_IXL: return 8; case REG_IXH: return 9;
+        case REG_IYL: return 10; case REG_IYH: return 11;
+        case REG_IZL: return 12; case REG_IZH: return 13;
+        /* Q-bank */
+        case REG_QW: return 16; case REG_QA: return 17;
+        case REG_QB: return 18; case REG_QC: return 19;
+        case REG_QD: return 20; case REG_QE: return 21;
+        case REG_QH: return 22; case REG_QL: return 23;
+        /* Q-bank index bytes */
+        case REG_QIXL: return 24; case REG_QIXH: return 25;
+        case REG_QIYL: return 26; case REG_QIYH: return 27;
+        case REG_QIZL: return 28; case REG_QIZH: return 29;
         default: return -1;
     }
 }
@@ -36,10 +50,16 @@ static int get_reg8_code(RegisterType reg) {
 /* Get 16-bit register encoding */
 static int get_reg16_code(RegisterType reg) {
     switch (reg) {
+        /* Current bank */
         case REG_WA: return 0; case REG_BC: return 1;
         case REG_DE: return 2; case REG_HL: return 3;
         case REG_IX: return 4; case REG_IY: return 5;
         case REG_IZ: return 6; case REG_SP: return 7;
+        /* Q-bank */
+        case REG_QWA: return 8; case REG_QBC: return 9;
+        case REG_QDE: return 10; case REG_QHL: return 11;
+        case REG_QIX: return 12; case REG_QIY: return 13;
+        case REG_QIZ: return 14;
         default: return -1;
     }
 }
@@ -58,8 +78,14 @@ static int get_reg32_code(RegisterType reg) {
 /* Get register pair prefix byte for 8-bit ops */
 static int get_reg8_prefix(RegisterType reg) {
     int code = get_reg8_code(reg);
-    if (code >= 0) {
+    if (code >= 0 && code < 8) {
         return 0xC8 + (code >> 1);  /* Pairs: W/A, B/C, D/E, H/L */
+    } else if (code >= 8 && code < 14) {
+        return 0xD0 + ((code - 8) >> 1);  /* Index pairs: IXL/IXH, IYL/IYH, IZL/IZH */
+    } else if (code >= 16 && code < 24) {
+        return 0xD8 + ((code - 16) >> 1);  /* Q-bank pairs */
+    } else if (code >= 24 && code < 30) {
+        return 0xE0 + ((code - 24) >> 1);  /* Q-bank index pairs */
     }
     return -1;
 }
