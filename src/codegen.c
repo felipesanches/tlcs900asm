@@ -1357,6 +1357,67 @@ static bool encode_cp(Assembler *as, Operand *ops, int count) {
         }
     }
 
+    /* CP reg, (mem) */
+    if (dst->mode == ADDR_REGISTER &&
+        (src->mode == ADDR_REGISTER_IND || src->mode == ADDR_INDEXED ||
+         src->mode == ADDR_DIRECT)) {
+        if (dst->size == SIZE_BYTE) {
+            int code = get_reg8_code(dst->reg);
+            if (code >= 0) {
+                emit_byte(as, 0x80 + (code >> 1));
+                emit_mem_operand(as, src);
+                emit_byte(as, 0x70 + (code & 1));
+                return true;
+            }
+        } else if (dst->size == SIZE_WORD) {
+            int code = get_reg16_code(dst->reg);
+            if (code >= 0) {
+                emit_byte(as, 0x90);
+                emit_mem_operand(as, src);
+                emit_byte(as, 0x70 + code);
+                return true;
+            }
+        } else if (dst->size == SIZE_LONG) {
+            int code = get_reg32_code(dst->reg);
+            if (code >= 0) {
+                emit_byte(as, 0xA0);
+                emit_mem_operand(as, src);
+                emit_byte(as, 0x70 + code);
+                return true;
+            }
+        }
+    }
+
+    /* CP (mem), reg */
+    if ((dst->mode == ADDR_REGISTER_IND || dst->mode == ADDR_INDEXED ||
+         dst->mode == ADDR_DIRECT) && src->mode == ADDR_REGISTER) {
+        if (src->size == SIZE_BYTE) {
+            int code = get_reg8_code(src->reg);
+            if (code >= 0) {
+                emit_byte(as, 0x80 + (code >> 1));
+                emit_mem_operand(as, dst);
+                emit_byte(as, 0x78 + (code & 1));
+                return true;
+            }
+        } else if (src->size == SIZE_WORD) {
+            int code = get_reg16_code(src->reg);
+            if (code >= 0) {
+                emit_byte(as, 0x90);
+                emit_mem_operand(as, dst);
+                emit_byte(as, 0x78 + code);
+                return true;
+            }
+        } else if (src->size == SIZE_LONG) {
+            int code = get_reg32_code(src->reg);
+            if (code >= 0) {
+                emit_byte(as, 0xA0);
+                emit_mem_operand(as, dst);
+                emit_byte(as, 0x78 + code);
+                return true;
+            }
+        }
+    }
+
     error(as, "unsupported CP operand combination");
     return false;
 }
