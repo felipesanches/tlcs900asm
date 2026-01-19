@@ -31,6 +31,22 @@ void lexer_init(const char *input) {
     has_peeked = false;
 }
 
+void lexer_save_state(LexerState *state) {
+    state->pos = input_pos;
+    state->line = current_line;
+    state->column = current_column;
+    state->peeked = peeked_token;
+    state->has_peeked = has_peeked;
+}
+
+void lexer_restore_state(const LexerState *state) {
+    input_pos = state->pos;
+    current_line = state->line;
+    current_column = state->column;
+    peeked_token = state->peeked;
+    has_peeked = state->has_peeked;
+}
+
 void lexer_set_line(int line) {
     current_line = line;
 }
@@ -402,4 +418,9 @@ Token lexer_peek(void) {
         has_peeked = true;
     }
     return peeked_token;
+}
+
+void lexer_push_back(Token tok) {
+    peeked_token = tok;
+    has_peeked = true;
 }

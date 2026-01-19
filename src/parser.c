@@ -155,6 +155,16 @@ static bool parse_operand_internal(Assembler *as, Operand *op) {
                     op->value = offset;
                     op->value_known = known;
                     tok = lexer_peek();
+                    /* Check for :8/:16/:24 size suffix inside parentheses */
+                    if (tok.type == TOK_COLON) {
+                        lexer_next();
+                        tok = lexer_peek();
+                        if (tok.type == TOK_NUMBER) {
+                            lexer_next();
+                            op->addr_size = (int)tok.value;
+                        }
+                        tok = lexer_peek();
+                    }
                     if (tok.type != TOK_RPAREN) {
                         error(as, "expected ')' after indexed addressing");
                         return false;
@@ -178,6 +188,16 @@ static bool parse_operand_internal(Assembler *as, Operand *op) {
                     op->value = -offset;
                     op->value_known = known;
                     tok = lexer_peek();
+                    /* Check for :8/:16/:24 size suffix inside parentheses */
+                    if (tok.type == TOK_COLON) {
+                        lexer_next();
+                        tok = lexer_peek();
+                        if (tok.type == TOK_NUMBER) {
+                            lexer_next();
+                            op->addr_size = (int)tok.value;
+                        }
+                        tok = lexer_peek();
+                    }
                     if (tok.type != TOK_RPAREN) {
                         error(as, "expected ')' after indexed addressing");
                         return false;
@@ -250,8 +270,55 @@ static bool parse_operand_internal(Assembler *as, Operand *op) {
     if (tok.type == TOK_IDENTIFIER) {
         RegisterType reg;
         OperandSize size;
+        ConditionCode cc;
 
-        if (is_register(tok.text, &reg, &size)) {
+        bool is_reg = is_register(tok.text, &reg, &size);
+        bool is_cc = is_condition(tok.text, &cc);
+
+        /* If both register and condition code, look ahead to disambiguate */
+        /* JR C, label - C is condition, second operand is immediate/label */
+        /* LD C, (mem) - C is register, second operand starts with ( */
+        if (is_reg && is_cc) {
+            /* Save state before lookahead */
+            LexerState saved;
+            lexer_save_state(&saved);
+
+            lexer_next();  /* consume the identifier (C, Z, etc.) */
+            Token next = lexer_peek();
+            if (next.type == TOK_COMMA) {
+                /* Look ahead past the comma */
+                lexer_next();  /* consume comma */
+                Token after_comma = lexer_peek();
+
+                /* Restore to just after the identifier */
+                lexer_restore_state(&saved);
+                lexer_next();  /* re-consume identifier */
+
+                /* If next operand starts with (, #, $, number, or is a register, treat as register */
+                if (after_comma.type == TOK_LPAREN ||
+                    after_comma.type == TOK_HASH ||
+                    after_comma.type == TOK_DOLLAR ||
+                    after_comma.type == TOK_NUMBER ||
+                    (after_comma.type == TOK_IDENTIFIER &&
+                     is_register(after_comma.text, NULL, NULL))) {
+                    op->mode = ADDR_REGISTER;
+                    op->reg = reg;
+                    op->size = size;
+                    return true;
+                }
+                /* Otherwise treat as condition code */
+                op->mode = ADDR_CONDITION;
+                op->value = cc;
+                return true;
+            }
+            /* Not followed by comma - treat as register */
+            op->mode = ADDR_REGISTER;
+            op->reg = reg;
+            op->size = size;
+            return true;
+        }
+
+        if (is_reg) {
             lexer_next();
             op->mode = ADDR_REGISTER;
             op->reg = reg;
@@ -260,8 +327,7 @@ static bool parse_operand_internal(Assembler *as, Operand *op) {
         }
 
         /* Check for condition code */
-        ConditionCode cc;
-        if (is_condition(tok.text, &cc)) {
+        if (is_cc) {
             lexer_next();
             op->mode = ADDR_CONDITION;
             op->value = cc;

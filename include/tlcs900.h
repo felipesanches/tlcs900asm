@@ -61,6 +61,15 @@ typedef struct {
     int column;
 } Token;
 
+/* Lexer state for save/restore */
+typedef struct {
+    const char *pos;
+    int line;
+    int column;
+    Token peeked;
+    bool has_peeked;
+} LexerState;
+
 /* Register types */
 typedef enum {
     REG_NONE = 0,
@@ -227,7 +236,10 @@ typedef struct {
 void lexer_init(const char *input);
 Token lexer_next(void);
 Token lexer_peek(void);
+void lexer_push_back(Token tok);
 void lexer_set_line(int line);
+void lexer_save_state(LexerState *state);
+void lexer_restore_state(const LexerState *state);
 
 /* Symbols */
 void symbols_init(Assembler *as);
