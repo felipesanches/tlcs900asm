@@ -265,6 +265,16 @@ static bool parse_operand_internal(Assembler *as, Operand *op) {
         op->value_known = known;
 
         tok = lexer_peek();
+        /* Check for :8/:16/:24 size suffix inside parentheses */
+        if (tok.type == TOK_COLON) {
+            lexer_next();
+            tok = lexer_peek();
+            if (tok.type == TOK_NUMBER) {
+                op->addr_size = (int)tok.value;
+                lexer_next();
+            }
+            tok = lexer_peek();
+        }
         if (tok.type != TOK_RPAREN) {
             error(as, "expected ')' after address");
             return false;

@@ -335,6 +335,15 @@ static bool encode_pushw(Assembler *as, Operand *ops, int count) {
         return true;
     }
 
+    /* PUSHW (mem) - push word from memory */
+    if (ops[0].mode == ADDR_REGISTER_IND || ops[0].mode == ADDR_INDEXED ||
+        ops[0].mode == ADDR_DIRECT) {
+        emit_byte(as, 0x90);  /* Word memory prefix */
+        emit_mem_operand(as, &ops[0]);
+        emit_byte(as, 0x04);  /* PUSH opcode */
+        return true;
+    }
+
     error(as, "invalid PUSHW operand");
     return false;
 }
@@ -489,16 +498,12 @@ static bool encode_jp(Assembler *as, Operand *ops, int count) {
         return true;
     }
 
-    /* JP (mem) - indirect jump */
+    /* JP [cc,] (mem) - indirect jump */
     if (target->mode == ADDR_REGISTER_IND || target->mode == ADDR_INDEXED ||
         target->mode == ADDR_DIRECT) {
-        if (cc != CC_T) {
-            error(as, "conditional JP not supported with indirect addressing");
-            return false;
-        }
         emit_byte(as, 0xB4);
         emit_mem_operand(as, target);
-        emit_byte(as, 0xD8);
+        emit_byte(as, 0xD0 + get_cc_code(cc));
         return true;
     }
 
@@ -591,16 +596,23 @@ static bool encode_call(Assembler *as, Operand *ops, int count) {
         return true;
     }
 
-    /* CALL (mem) - indirect call */
+    /* CALL [cc,] reg32 - call to address in register */
+    if (target->mode == ADDR_REGISTER && target->size == SIZE_LONG) {
+        int code = get_reg32_code(target->reg);
+        if (code >= 0) {
+            emit_byte(as, 0xE8 + code);
+            emit_byte(as, 0x90 + get_cc_code(cc));
+            return true;
+        }
+    }
+
+    /* CALL [cc,] (mem) - indirect call */
     if (target->mode == ADDR_REGISTER_IND || target->mode == ADDR_INDEXED ||
         target->mode == ADDR_DIRECT) {
-        if (cc != CC_T) {
-            error(as, "conditional CALL not supported with indirect addressing");
-            return false;
-        }
         emit_byte(as, 0xB4);
         emit_mem_operand(as, target);
-        emit_byte(as, 0xD9);
+        /* CALL cc,(mem) uses 0xD1+cc where cc=8 for unconditional */
+        emit_byte(as, 0xD1 + get_cc_code(cc));
         return true;
     }
 
@@ -1169,6 +1181,36 @@ static bool encode_add(Assembler *as, Operand *ops, int count) {
         }
     }
 
+    /* ADD (mem), reg */
+    if ((dst->mode == ADDR_REGISTER_IND || dst->mode == ADDR_INDEXED ||
+         dst->mode == ADDR_DIRECT) && src->mode == ADDR_REGISTER) {
+        if (src->size == SIZE_BYTE) {
+            int code = get_reg8_code(src->reg);
+            if (code >= 0) {
+                emit_byte(as, 0x80 + (code >> 1));
+                emit_mem_operand(as, dst);
+                emit_byte(as, 0x08 + (code & 1));
+                return true;
+            }
+        } else if (src->size == SIZE_WORD) {
+            int code = get_reg16_code(src->reg);
+            if (code >= 0) {
+                emit_byte(as, 0x90);
+                emit_mem_operand(as, dst);
+                emit_byte(as, 0x08 + code);
+                return true;
+            }
+        } else if (src->size == SIZE_LONG) {
+            int code = get_reg32_code(src->reg);
+            if (code >= 0) {
+                emit_byte(as, 0xA0);
+                emit_mem_operand(as, dst);
+                emit_byte(as, 0x08 + code);
+                return true;
+            }
+        }
+    }
+
     error(as, "unsupported ADD operand combination");
     return false;
 }
@@ -1292,6 +1334,67 @@ static bool encode_sub(Assembler *as, Operand *ops, int count) {
             if (dcode >= 0 && scode >= 0) {
                 emit_byte(as, 0xE8 + scode);
                 emit_byte(as, 0x90 + dcode);
+                return true;
+            }
+        }
+    }
+
+    /* SUB reg, (mem) */
+    if (dst->mode == ADDR_REGISTER &&
+        (src->mode == ADDR_REGISTER_IND || src->mode == ADDR_INDEXED ||
+         src->mode == ADDR_DIRECT)) {
+        if (dst->size == SIZE_BYTE) {
+            int code = get_reg8_code(dst->reg);
+            if (code >= 0) {
+                emit_byte(as, 0x80 + (code >> 1));
+                emit_mem_operand(as, src);
+                emit_byte(as, 0x02 + (code & 1));
+                return true;
+            }
+        } else if (dst->size == SIZE_WORD) {
+            int code = get_reg16_code(dst->reg);
+            if (code >= 0) {
+                emit_byte(as, 0x90);
+                emit_mem_operand(as, src);
+                emit_byte(as, 0x20 + code);
+                return true;
+            }
+        } else if (dst->size == SIZE_LONG) {
+            int code = get_reg32_code(dst->reg);
+            if (code >= 0) {
+                emit_byte(as, 0xA0);
+                emit_mem_operand(as, src);
+                emit_byte(as, 0x20 + code);
+                return true;
+            }
+        }
+    }
+
+    /* SUB (mem), reg */
+    if ((dst->mode == ADDR_REGISTER_IND || dst->mode == ADDR_INDEXED ||
+         dst->mode == ADDR_DIRECT) && src->mode == ADDR_REGISTER) {
+        if (src->size == SIZE_BYTE) {
+            int code = get_reg8_code(src->reg);
+            if (code >= 0) {
+                emit_byte(as, 0x80 + (code >> 1));
+                emit_mem_operand(as, dst);
+                emit_byte(as, 0x0A + (code & 1));
+                return true;
+            }
+        } else if (src->size == SIZE_WORD) {
+            int code = get_reg16_code(src->reg);
+            if (code >= 0) {
+                emit_byte(as, 0x90);
+                emit_mem_operand(as, dst);
+                emit_byte(as, 0x28 + code);
+                return true;
+            }
+        } else if (src->size == SIZE_LONG) {
+            int code = get_reg32_code(src->reg);
+            if (code >= 0) {
+                emit_byte(as, 0xA0);
+                emit_mem_operand(as, dst);
+                emit_byte(as, 0x28 + code);
                 return true;
             }
         }
@@ -1777,12 +1880,32 @@ static bool encode_mul(Assembler *as, Operand *ops, int count) {
 
     /* MUL reg, reg */
     if (dst->mode == ADDR_REGISTER && src->mode == ADDR_REGISTER) {
+        /* MUL RR, r - word register x byte register -> long result */
+        if (dst->size == SIZE_WORD && src->size == SIZE_BYTE) {
+            int dcode = get_reg16_code(dst->reg);
+            int scode = get_reg8_code(src->reg);
+            if (dcode >= 0 && scode >= 0) {
+                emit_byte(as, 0xC8 + (scode >> 1));
+                emit_byte(as, 0x40 + ((scode & 1) << 3) + dcode);
+                return true;
+            }
+        }
         if (dst->size == SIZE_WORD && src->size == SIZE_WORD) {
             int dcode = get_reg16_code(dst->reg);
             int scode = get_reg16_code(src->reg);
             if (dcode >= 0 && scode >= 0) {
                 emit_byte(as, 0xD8 + scode);
                 emit_byte(as, 0x40 + dcode);
+                return true;
+            }
+        }
+        /* MUL XRR, RR - long register x word register -> qword result */
+        if (dst->size == SIZE_LONG && src->size == SIZE_WORD) {
+            int dcode = get_reg32_code(dst->reg);
+            int scode = get_reg16_code(src->reg);
+            if (dcode >= 0 && scode >= 0) {
+                emit_byte(as, 0xD8 + scode);
+                emit_byte(as, 0x48 + dcode);
                 return true;
             }
         }
@@ -2036,6 +2159,37 @@ static bool encode_and(Assembler *as, Operand *ops, int count) {
         return true;
     }
 
+    /* AND reg, (mem) */
+    if (dst->mode == ADDR_REGISTER &&
+        (src->mode == ADDR_REGISTER_IND || src->mode == ADDR_INDEXED ||
+         src->mode == ADDR_DIRECT)) {
+        if (dst->size == SIZE_BYTE) {
+            int code = get_reg8_code(dst->reg);
+            if (code >= 0) {
+                emit_byte(as, 0x80 + (code >> 1));
+                emit_mem_operand(as, src);
+                emit_byte(as, 0x04 + (code & 1));
+                return true;
+            }
+        } else if (dst->size == SIZE_WORD) {
+            int code = get_reg16_code(dst->reg);
+            if (code >= 0) {
+                emit_byte(as, 0x90);
+                emit_mem_operand(as, src);
+                emit_byte(as, 0x40 + code);
+                return true;
+            }
+        } else if (dst->size == SIZE_LONG) {
+            int code = get_reg32_code(dst->reg);
+            if (code >= 0) {
+                emit_byte(as, 0xA0);
+                emit_mem_operand(as, src);
+                emit_byte(as, 0x40 + code);
+                return true;
+            }
+        }
+    }
+
     error(as, "unsupported AND operand combination");
     return false;
 }
@@ -2115,6 +2269,67 @@ static bool encode_or(Assembler *as, Operand *ops, int count) {
         emit_byte(as, 0x2E);
         emit_byte(as, (uint8_t)src->value);
         return true;
+    }
+
+    /* OR reg, (mem) */
+    if (dst->mode == ADDR_REGISTER &&
+        (src->mode == ADDR_REGISTER_IND || src->mode == ADDR_INDEXED ||
+         src->mode == ADDR_DIRECT)) {
+        if (dst->size == SIZE_BYTE) {
+            int code = get_reg8_code(dst->reg);
+            if (code >= 0) {
+                emit_byte(as, 0x80 + (code >> 1));
+                emit_mem_operand(as, src);
+                emit_byte(as, 0x06 + (code & 1));
+                return true;
+            }
+        } else if (dst->size == SIZE_WORD) {
+            int code = get_reg16_code(dst->reg);
+            if (code >= 0) {
+                emit_byte(as, 0x90);
+                emit_mem_operand(as, src);
+                emit_byte(as, 0x60 + code);
+                return true;
+            }
+        } else if (dst->size == SIZE_LONG) {
+            int code = get_reg32_code(dst->reg);
+            if (code >= 0) {
+                emit_byte(as, 0xA0);
+                emit_mem_operand(as, src);
+                emit_byte(as, 0x60 + code);
+                return true;
+            }
+        }
+    }
+
+    /* OR (mem), reg */
+    if ((dst->mode == ADDR_REGISTER_IND || dst->mode == ADDR_INDEXED ||
+         dst->mode == ADDR_DIRECT) && src->mode == ADDR_REGISTER) {
+        if (src->size == SIZE_BYTE) {
+            int code = get_reg8_code(src->reg);
+            if (code >= 0) {
+                emit_byte(as, 0x80 + (code >> 1));
+                emit_mem_operand(as, dst);
+                emit_byte(as, 0x0E + (code & 1));
+                return true;
+            }
+        } else if (src->size == SIZE_WORD) {
+            int code = get_reg16_code(src->reg);
+            if (code >= 0) {
+                emit_byte(as, 0x90);
+                emit_mem_operand(as, dst);
+                emit_byte(as, 0x68 + code);
+                return true;
+            }
+        } else if (src->size == SIZE_LONG) {
+            int code = get_reg32_code(src->reg);
+            if (code >= 0) {
+                emit_byte(as, 0xA0);
+                emit_mem_operand(as, dst);
+                emit_byte(as, 0x68 + code);
+                return true;
+            }
+        }
     }
 
     error(as, "unsupported OR operand combination");
@@ -2270,6 +2485,67 @@ static bool encode_xor(Assembler *as, Operand *ops, int count) {
         return true;
     }
 
+    /* XOR reg, (mem) */
+    if (dst->mode == ADDR_REGISTER &&
+        (src->mode == ADDR_REGISTER_IND || src->mode == ADDR_INDEXED ||
+         src->mode == ADDR_DIRECT)) {
+        if (dst->size == SIZE_BYTE) {
+            int code = get_reg8_code(dst->reg);
+            if (code >= 0) {
+                emit_byte(as, 0x80 + (code >> 1));
+                emit_mem_operand(as, src);
+                emit_byte(as, 0x10 + (code & 1));
+                return true;
+            }
+        } else if (dst->size == SIZE_WORD) {
+            int code = get_reg16_code(dst->reg);
+            if (code >= 0) {
+                emit_byte(as, 0x90);
+                emit_mem_operand(as, src);
+                emit_byte(as, 0x80 + code);
+                return true;
+            }
+        } else if (dst->size == SIZE_LONG) {
+            int code = get_reg32_code(dst->reg);
+            if (code >= 0) {
+                emit_byte(as, 0xA0);
+                emit_mem_operand(as, src);
+                emit_byte(as, 0x80 + code);
+                return true;
+            }
+        }
+    }
+
+    /* XOR (mem), reg */
+    if ((dst->mode == ADDR_REGISTER_IND || dst->mode == ADDR_INDEXED ||
+         dst->mode == ADDR_DIRECT) && src->mode == ADDR_REGISTER) {
+        if (src->size == SIZE_BYTE) {
+            int code = get_reg8_code(src->reg);
+            if (code >= 0) {
+                emit_byte(as, 0x80 + (code >> 1));
+                emit_mem_operand(as, dst);
+                emit_byte(as, 0x18 + (code & 1));
+                return true;
+            }
+        } else if (src->size == SIZE_WORD) {
+            int code = get_reg16_code(src->reg);
+            if (code >= 0) {
+                emit_byte(as, 0x90);
+                emit_mem_operand(as, dst);
+                emit_byte(as, 0x88 + code);
+                return true;
+            }
+        } else if (src->size == SIZE_LONG) {
+            int code = get_reg32_code(src->reg);
+            if (code >= 0) {
+                emit_byte(as, 0xA0);
+                emit_mem_operand(as, dst);
+                emit_byte(as, 0x88 + code);
+                return true;
+            }
+        }
+    }
+
     error(as, "unsupported XOR operand combination");
     return false;
 }
@@ -2409,14 +2685,23 @@ static bool encode_bit(Assembler *as, Operand *ops, int count) {
         return false;
     }
 
-    int bit = (int)ops[0].value & 7;
-
     if (ops[1].mode == ADDR_REGISTER) {
         if (ops[1].size == SIZE_BYTE) {
+            int bit = (int)ops[0].value & 7;
             int code = get_reg8_code(ops[1].reg);
             if (code >= 0) {
                 emit_byte(as, 0xC8 + (code >> 1));
                 emit_byte(as, 0x58 + (code & 1));
+                emit_byte(as, bit);
+                return true;
+            }
+        }
+        if (ops[1].size == SIZE_WORD) {
+            int bit = (int)ops[0].value & 15;
+            int code = get_reg16_code(ops[1].reg);
+            if (code >= 0) {
+                emit_byte(as, 0xE8 + code);
+                emit_byte(as, 0x18);
                 emit_byte(as, bit);
                 return true;
             }
@@ -2426,6 +2711,7 @@ static bool encode_bit(Assembler *as, Operand *ops, int count) {
     /* BIT n, (mem) */
     if (ops[1].mode == ADDR_DIRECT || ops[1].mode == ADDR_REGISTER_IND ||
         ops[1].mode == ADDR_INDEXED) {
+        int bit = (int)ops[0].value & 7;
         emit_byte(as, 0xB0);
         emit_mem_operand(as, &ops[1]);
         emit_byte(as, 0xC0 + bit);
@@ -2443,14 +2729,23 @@ static bool encode_set(Assembler *as, Operand *ops, int count) {
         return false;
     }
 
-    int bit = (int)ops[0].value & 7;
-
     if (ops[1].mode == ADDR_REGISTER) {
         if (ops[1].size == SIZE_BYTE) {
+            int bit = (int)ops[0].value & 7;
             int code = get_reg8_code(ops[1].reg);
             if (code >= 0) {
                 emit_byte(as, 0xC8 + (code >> 1));
                 emit_byte(as, 0x70 + (code & 1));
+                emit_byte(as, bit);
+                return true;
+            }
+        }
+        if (ops[1].size == SIZE_WORD) {
+            int bit = (int)ops[0].value & 15;
+            int code = get_reg16_code(ops[1].reg);
+            if (code >= 0) {
+                emit_byte(as, 0xE8 + code);
+                emit_byte(as, 0x30);
                 emit_byte(as, bit);
                 return true;
             }
@@ -2460,6 +2755,7 @@ static bool encode_set(Assembler *as, Operand *ops, int count) {
     /* SET n, (mem) */
     if (ops[1].mode == ADDR_DIRECT || ops[1].mode == ADDR_REGISTER_IND ||
         ops[1].mode == ADDR_INDEXED) {
+        int bit = (int)ops[0].value & 7;
         emit_byte(as, 0xB0);
         emit_mem_operand(as, &ops[1]);
         emit_byte(as, 0xA0 + bit);
@@ -2477,14 +2773,23 @@ static bool encode_res(Assembler *as, Operand *ops, int count) {
         return false;
     }
 
-    int bit = (int)ops[0].value & 7;
-
     if (ops[1].mode == ADDR_REGISTER) {
         if (ops[1].size == SIZE_BYTE) {
+            int bit = (int)ops[0].value & 7;
             int code = get_reg8_code(ops[1].reg);
             if (code >= 0) {
                 emit_byte(as, 0xC8 + (code >> 1));
                 emit_byte(as, 0x78 + (code & 1));
+                emit_byte(as, bit);
+                return true;
+            }
+        }
+        if (ops[1].size == SIZE_WORD) {
+            int bit = (int)ops[0].value & 15;
+            int code = get_reg16_code(ops[1].reg);
+            if (code >= 0) {
+                emit_byte(as, 0xE8 + code);
+                emit_byte(as, 0x38);
                 emit_byte(as, bit);
                 return true;
             }
@@ -2494,6 +2799,7 @@ static bool encode_res(Assembler *as, Operand *ops, int count) {
     /* RES n, (mem) */
     if (ops[1].mode == ADDR_DIRECT || ops[1].mode == ADDR_REGISTER_IND ||
         ops[1].mode == ADDR_INDEXED) {
+        int bit = (int)ops[0].value & 7;
         emit_byte(as, 0xB0);
         emit_mem_operand(as, &ops[1]);
         emit_byte(as, 0xB0 + bit);
@@ -2657,19 +2963,39 @@ static bool encode_scc(Assembler *as, Operand *ops, int count) {
         return false;
     }
 
-    if (ops[0].mode != ADDR_CONDITION) {
+    int cc;
+
+    if (ops[0].mode == ADDR_CONDITION) {
+        cc = get_cc_code(ops[0].value);
+    } else if (ops[0].mode == ADDR_REGISTER && ops[0].size == SIZE_BYTE) {
+        /* C, Z registers are also condition codes - for SCC, treat them as conditions */
+        if (ops[0].reg == REG_C) {
+            cc = get_cc_code(CC_C);  /* Carry */
+        } else {
+            error(as, "SCC first operand must be a condition");
+            return false;
+        }
+    } else {
         error(as, "SCC first operand must be a condition");
         return false;
     }
 
-    int cc = get_cc_code(ops[0].value);
-
-    if (ops[1].mode == ADDR_REGISTER && ops[1].size == SIZE_BYTE) {
-        int code = get_reg8_code(ops[1].reg);
-        if (code >= 0) {
-            emit_byte(as, 0xC8 + (code >> 1));
-            emit_byte(as, 0x70 + cc);
-            return true;
+    if (ops[1].mode == ADDR_REGISTER) {
+        if (ops[1].size == SIZE_BYTE) {
+            int code = get_reg8_code(ops[1].reg);
+            if (code >= 0) {
+                emit_byte(as, 0xC8 + (code >> 1));
+                emit_byte(as, 0x70 + cc);
+                return true;
+            }
+        }
+        if (ops[1].size == SIZE_WORD) {
+            int code = get_reg16_code(ops[1].reg);
+            if (code >= 0) {
+                emit_byte(as, 0xE8 + code);
+                emit_byte(as, 0x70 + cc);
+                return true;
+            }
         }
     }
 
