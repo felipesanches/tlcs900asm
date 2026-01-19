@@ -1432,14 +1432,14 @@ static bool encode_inc(Assembler *as, Operand *ops, int count) {
     int inc_val = 1;
     Operand *target = &ops[0];
 
-    /* Handle both "INC reg" and "INC n, reg" syntax */
+    /* Handle both "INC reg" and "INC n, reg/mem" syntax */
     if (count >= 2) {
-        if (ops[0].mode == ADDR_IMMEDIATE && ops[1].mode == ADDR_REGISTER) {
-            /* INC n, reg - increment amount first */
+        if (ops[0].mode == ADDR_IMMEDIATE) {
+            /* INC n, target - increment amount first */
             inc_val = (int)ops[0].value;
             target = &ops[1];
         } else if (ops[1].mode == ADDR_IMMEDIATE) {
-            /* INC reg, n - register first */
+            /* INC target, n - target first */
             inc_val = (int)ops[1].value;
         }
     }
@@ -1496,14 +1496,14 @@ static bool encode_dec(Assembler *as, Operand *ops, int count) {
     int dec_val = 1;
     Operand *target = &ops[0];
 
-    /* Handle both "DEC reg" and "DEC n, reg" syntax */
+    /* Handle both "DEC reg" and "DEC n, reg/mem" syntax */
     if (count >= 2) {
-        if (ops[0].mode == ADDR_IMMEDIATE && ops[1].mode == ADDR_REGISTER) {
-            /* DEC n, reg - decrement amount first */
+        if (ops[0].mode == ADDR_IMMEDIATE) {
+            /* DEC n, target - decrement amount first */
             dec_val = (int)ops[0].value;
             target = &ops[1];
         } else if (ops[1].mode == ADDR_IMMEDIATE) {
-            /* DEC reg, n - register first */
+            /* DEC target, n - target first */
             dec_val = (int)ops[1].value;
         }
     }
@@ -1547,6 +1547,70 @@ static bool encode_dec(Assembler *as, Operand *ops, int count) {
     }
 
     error(as, "unsupported DEC operand");
+    return false;
+}
+
+/* INCW - Increment Word (memory) */
+static bool encode_incw(Assembler *as, Operand *ops, int count) {
+    if (count < 1) {
+        error(as, "INCW requires an operand");
+        return false;
+    }
+
+    int inc_val = 1;
+    Operand *target = &ops[0];
+
+    /* Handle "INCW n, (mem)" syntax */
+    if (count >= 2) {
+        if (ops[0].mode == ADDR_IMMEDIATE) {
+            inc_val = (int)ops[0].value;
+            target = &ops[1];
+        }
+    }
+
+    /* INCW (mem) */
+    if (target->mode == ADDR_REGISTER_IND || target->mode == ADDR_INDEXED ||
+        target->mode == ADDR_DIRECT) {
+        emit_byte(as, 0x90);  /* Word memory prefix */
+        emit_mem_operand(as, target);
+        emit_byte(as, 0x60);
+        emit_byte(as, (uint8_t)inc_val);
+        return true;
+    }
+
+    error(as, "unsupported INCW operand");
+    return false;
+}
+
+/* DECW - Decrement Word (memory) */
+static bool encode_decw(Assembler *as, Operand *ops, int count) {
+    if (count < 1) {
+        error(as, "DECW requires an operand");
+        return false;
+    }
+
+    int dec_val = 1;
+    Operand *target = &ops[0];
+
+    /* Handle "DECW n, (mem)" syntax */
+    if (count >= 2) {
+        if (ops[0].mode == ADDR_IMMEDIATE) {
+            dec_val = (int)ops[0].value;
+            target = &ops[1];
+        }
+    }
+
+    /* DECW (mem) */
+    if (target->mode == ADDR_REGISTER_IND || target->mode == ADDR_INDEXED ||
+        target->mode == ADDR_DIRECT) {
+        emit_byte(as, 0x90);  /* Word memory prefix */
+        emit_mem_operand(as, target);
+        emit_byte(as, 0x68);
+        emit_byte(as, (uint8_t)dec_val);
+        return true;
+    }
+
+    error(as, "unsupported DECW operand");
     return false;
 }
 
@@ -2324,6 +2388,42 @@ static bool encode_chg(Assembler *as, Operand *ops, int count) {
     return false;
 }
 
+/* STCF - Store Carry Flag to bit */
+static bool encode_stcf(Assembler *as, Operand *ops, int count) {
+    if (count < 2) {
+        error(as, "STCF requires bit and operand");
+        return false;
+    }
+
+    /* STCF A, (mem) - store CF to bit specified by A */
+    if (ops[0].mode == ADDR_REGISTER && ops[0].reg == REG_A) {
+        if (ops[1].mode == ADDR_DIRECT || ops[1].mode == ADDR_REGISTER_IND ||
+            ops[1].mode == ADDR_INDEXED) {
+            emit_byte(as, 0xB0);  /* Bit operation memory prefix */
+            emit_mem_operand(as, &ops[1]);
+            emit_byte(as, 0x34);
+            return true;
+        }
+    }
+
+    /* STCF n, reg - store CF to bit n of register */
+    if (ops[0].mode == ADDR_IMMEDIATE && ops[1].mode == ADDR_REGISTER) {
+        int bit = (int)ops[0].value & 7;
+        if (ops[1].size == SIZE_BYTE) {
+            int code = get_reg8_code(ops[1].reg);
+            if (code >= 0) {
+                emit_byte(as, 0xC8 + (code >> 1));
+                emit_byte(as, 0x30 + (code & 1));
+                emit_byte(as, bit);
+                return true;
+            }
+        }
+    }
+
+    error(as, "unsupported STCF operand");
+    return false;
+}
+
 /* ============== Extension Instructions ============== */
 
 /* EXTZ - Extend with zeros */
@@ -2467,7 +2567,9 @@ static const struct {
     {"SBC", encode_sbc},
     {"CP", encode_cp},
     {"INC", encode_inc},
+    {"INCW", encode_incw},
     {"DEC", encode_dec},
+    {"DECW", encode_decw},
     {"NEG", encode_neg},
     {"MUL", encode_mul},
     {"MULS", encode_muls},
@@ -2497,6 +2599,7 @@ static const struct {
     {"RES", encode_res},
     {"TSET", encode_tset},
     {"CHG", encode_chg},
+    {"STCF", encode_stcf},
 
     /* Extension */
     {"EXTZ", encode_extz},
