@@ -77,15 +77,18 @@ int main(int argc, char *argv[]) {
     as->verbose = verbose;
 
     /* Assemble the file */
-    if (!assembler_assemble_file(as, input_file)) {
-        fprintf(stderr, "Assembly failed with %d errors\n", as->error_count);
-        assembler_free(as);
-        return 1;
+    bool success = assembler_assemble_file(as, input_file);
+
+    /* Write output even if there were errors (for debugging/comparison) */
+    if (as->output_size > 0) {
+        if (!assembler_write_output(as, output_file)) {
+            fprintf(stderr, "Failed to write output file\n");
+            assembler_free(as);
+            return 1;
+        }
     }
 
-    /* Write output */
-    if (!assembler_write_output(as, output_file)) {
-        fprintf(stderr, "Failed to write output file\n");
+    if (!success) {
         assembler_free(as);
         return 1;
     }

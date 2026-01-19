@@ -125,9 +125,9 @@ bool assembler_assemble_file(Assembler *as, const char *filename) {
         return false;
     }
 
-    if (as->errors) {
-        fprintf(stderr, "Pass 1 failed with %d errors\n", as->error_count);
-        return false;
+    bool had_pass1_errors = as->errors;
+    if (had_pass1_errors) {
+        fprintf(stderr, "Pass 1 had %d errors, continuing to pass 2...\n", as->error_count);
     }
 
     /* Pass 2: Generate code */
@@ -145,8 +145,12 @@ bool assembler_assemble_file(Assembler *as, const char *filename) {
         return false;
     }
 
-    if (as->errors) {
-        fprintf(stderr, "Pass 2 failed with %d errors\n", as->error_count);
+    if (as->errors || had_pass1_errors) {
+        fprintf(stderr, "Assembly failed with %d errors\n", as->error_count);
+        /* Still output the file for debugging/comparison purposes */
+        if (as->output_size > 0) {
+            fprintf(stderr, "Partial output: %zu bytes generated (with errors)\n", as->output_size);
+        }
         return false;
     }
 
