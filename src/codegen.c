@@ -1852,6 +1852,16 @@ static bool encode_and(Assembler *as, Operand *ops, int count) {
         }
     }
 
+    /* AND (mem), imm */
+    if ((dst->mode == ADDR_DIRECT || dst->mode == ADDR_REGISTER_IND ||
+         dst->mode == ADDR_INDEXED) && src->mode == ADDR_IMMEDIATE) {
+        emit_byte(as, 0xB0);
+        emit_mem_operand(as, dst);
+        emit_byte(as, 0x2C);
+        emit_byte(as, (uint8_t)src->value);
+        return true;
+    }
+
     error(as, "unsupported AND operand combination");
     return false;
 }
@@ -1907,6 +1917,16 @@ static bool encode_or(Assembler *as, Operand *ops, int count) {
         }
     }
 
+    /* OR (mem), imm */
+    if ((dst->mode == ADDR_DIRECT || dst->mode == ADDR_REGISTER_IND ||
+         dst->mode == ADDR_INDEXED) && src->mode == ADDR_IMMEDIATE) {
+        emit_byte(as, 0xB0);
+        emit_mem_operand(as, dst);
+        emit_byte(as, 0x2E);
+        emit_byte(as, (uint8_t)src->value);
+        return true;
+    }
+
     error(as, "unsupported OR operand combination");
     return false;
 }
@@ -1960,6 +1980,16 @@ static bool encode_xor(Assembler *as, Operand *ops, int count) {
                 return true;
             }
         }
+    }
+
+    /* XOR (mem), imm */
+    if ((dst->mode == ADDR_DIRECT || dst->mode == ADDR_REGISTER_IND ||
+         dst->mode == ADDR_INDEXED) && src->mode == ADDR_IMMEDIATE) {
+        emit_byte(as, 0xB0);
+        emit_mem_operand(as, dst);
+        emit_byte(as, 0x30);
+        emit_byte(as, (uint8_t)src->value);
+        return true;
     }
 
     error(as, "unsupported XOR operand combination");
