@@ -112,6 +112,21 @@ static bool is_condition(const char *name, ConditionCode *cc) {
     return false;
 }
 
+/* Check if a name is a control register (for LDC/STC) */
+static bool is_control_register(const char *name) {
+    static const char *ctrl_regs[] = {
+        "DMAS0", "DMAS1", "DMAS2", "DMAS3",
+        "DMAD0", "DMAD1", "DMAD2", "DMAD3",
+        "DMAC0", "DMAC1", "DMAC2", "DMAC3",
+        "DMAM0", "DMAM1", "DMAM2", "DMAM3",
+        NULL
+    };
+    for (int i = 0; ctrl_regs[i]; i++) {
+        if (strcasecmp(name, ctrl_regs[i]) == 0) return true;
+    }
+    return false;
+}
+
 /* Parse a single operand */
 bool parse_operand(Assembler *as, Operand *op) {
     memset(op, 0, sizeof(*op));
@@ -404,19 +419,22 @@ static bool parse_operand_internal(Assembler *as, Operand *op) {
     /* Skip optional # prefix */
     if (tok.type == TOK_HASH) {
         lexer_next();
+        tok = lexer_peek();
+    }
+
+    /* Check for control register names (for LDC/STC) before expression parsing */
+    if (tok.type == TOK_IDENTIFIER && is_control_register(tok.text)) {
+        lexer_next();
+        op->mode = ADDR_IMMEDIATE;
+        strncpy(op->symbol, tok.text, MAX_IDENTIFIER - 1);
+        op->value = 0;
+        op->value_known = false;
+        return true;
     }
 
     int64_t value;
     bool known;
     if (!expr_parse(as, &value, &known)) {
-        /* Could be a symbol - save for later */
-        if (tok.type == TOK_IDENTIFIER) {
-            lexer_next();
-            op->mode = ADDR_IMMEDIATE;
-            strncpy(op->symbol, tok.text, MAX_IDENTIFIER - 1);
-            op->value_known = false;
-            return true;
-        }
         error(as, "invalid operand");
         return false;
     }

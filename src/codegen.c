@@ -926,12 +926,58 @@ static bool encode_lda(Assembler *as, Operand *ops, int count) {
     return false;
 }
 
-/* LDC - Load control register (stub - complex) */
+/* Get control register code for LDC/STC instructions */
+static int get_ctrl_reg_code(const char *name) {
+    /* DMA Source registers */
+    if (strcasecmp(name, "DMAS0") == 0) return 0x00;
+    if (strcasecmp(name, "DMAS1") == 0) return 0x04;
+    if (strcasecmp(name, "DMAS2") == 0) return 0x08;
+    if (strcasecmp(name, "DMAS3") == 0) return 0x0C;
+    /* DMA Destination registers */
+    if (strcasecmp(name, "DMAD0") == 0) return 0x01;
+    if (strcasecmp(name, "DMAD1") == 0) return 0x05;
+    if (strcasecmp(name, "DMAD2") == 0) return 0x09;
+    if (strcasecmp(name, "DMAD3") == 0) return 0x0D;
+    /* DMA Count registers */
+    if (strcasecmp(name, "DMAC0") == 0) return 0x02;
+    if (strcasecmp(name, "DMAC1") == 0) return 0x06;
+    if (strcasecmp(name, "DMAC2") == 0) return 0x0A;
+    if (strcasecmp(name, "DMAC3") == 0) return 0x0E;
+    /* DMA Mode registers */
+    if (strcasecmp(name, "DMAM0") == 0) return 0x03;
+    if (strcasecmp(name, "DMAM1") == 0) return 0x07;
+    if (strcasecmp(name, "DMAM2") == 0) return 0x0B;
+    if (strcasecmp(name, "DMAM3") == 0) return 0x0F;
+    return -1;
+}
+
+/* LDC - Load control register */
 static bool encode_ldc(Assembler *as, Operand *ops, int count) {
-    /* LDC is complex - depends on control register names */
-    /* For now, provide basic support */
-    (void)ops; (void)count;
-    error(as, "LDC not yet fully implemented - use DB directive");
+    if (count < 2) {
+        error(as, "LDC requires control register and source register");
+        return false;
+    }
+
+    /* LDC cr, R32 - load control register from 32-bit register */
+    /* First operand is the control register (parsed as immediate/symbol) */
+    int cr_code = -1;
+
+    /* Check if first operand was parsed as immediate with symbol name */
+    if (ops[0].mode == ADDR_IMMEDIATE && ops[0].symbol[0] != '\0') {
+        cr_code = get_ctrl_reg_code(ops[0].symbol);
+    }
+
+    if (cr_code >= 0 && ops[1].mode == ADDR_REGISTER && ops[1].size == SIZE_LONG) {
+        int reg_code = get_reg32_code(ops[1].reg);
+        if (reg_code >= 0) {
+            emit_byte(as, 0xE8 + reg_code);
+            emit_byte(as, 0x03);
+            emit_byte(as, (uint8_t)cr_code);
+            return true;
+        }
+    }
+
+    error(as, "unsupported LDC operand combination");
     return false;
 }
 
