@@ -824,7 +824,8 @@ static bool encode_ld(Assembler *as, Operand *ops, int count) {
 
     /* LD (mem), imm */
     if ((dst->mode == ADDR_REGISTER_IND || dst->mode == ADDR_INDEXED ||
-         dst->mode == ADDR_DIRECT) && src->mode == ADDR_IMMEDIATE) {
+         dst->mode == ADDR_DIRECT || dst->mode == ADDR_REGISTER_IND_INC ||
+         dst->mode == ADDR_REGISTER_IND_DEC) && src->mode == ADDR_IMMEDIATE) {
         emit_byte(as, 0x80);
         emit_mem_operand(as, dst);
         emit_byte(as, 0x00);
@@ -1162,7 +1163,8 @@ static bool encode_add(Assembler *as, Operand *ops, int count) {
     /* ADD reg, (mem) */
     if (dst->mode == ADDR_REGISTER &&
         (src->mode == ADDR_REGISTER_IND || src->mode == ADDR_INDEXED ||
-         src->mode == ADDR_DIRECT)) {
+         src->mode == ADDR_DIRECT || src->mode == ADDR_REGISTER_IND_INC ||
+         src->mode == ADDR_REGISTER_IND_DEC)) {
         if (dst->size == SIZE_BYTE) {
             int code = get_reg8_code(dst->reg);
             if (code >= 0) {
