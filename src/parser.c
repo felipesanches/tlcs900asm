@@ -45,6 +45,12 @@ static const struct {
     {"QC", REG_QC, SIZE_BYTE}, {"QB", REG_QB, SIZE_BYTE},
     {"QE", REG_QE, SIZE_BYTE}, {"QD", REG_QD, SIZE_BYTE},
     {"QL", REG_QL, SIZE_BYTE}, {"QH", REG_QH, SIZE_BYTE},
+    {"IXL", REG_IXL, SIZE_BYTE}, {"IXH", REG_IXH, SIZE_BYTE},
+    {"IYL", REG_IYL, SIZE_BYTE}, {"IYH", REG_IYH, SIZE_BYTE},
+    {"IZL", REG_IZL, SIZE_BYTE}, {"IZH", REG_IZH, SIZE_BYTE},
+    {"QIXL", REG_QIXL, SIZE_BYTE}, {"QIXH", REG_QIXH, SIZE_BYTE},
+    {"QIYL", REG_QIYL, SIZE_BYTE}, {"QIYH", REG_QIYH, SIZE_BYTE},
+    {"QIZL", REG_QIZL, SIZE_BYTE}, {"QIZH", REG_QIZH, SIZE_BYTE},
     /* 16-bit registers */
     {"WA", REG_WA, SIZE_WORD}, {"BC", REG_BC, SIZE_WORD},
     {"DE", REG_DE, SIZE_WORD}, {"HL", REG_HL, SIZE_WORD},
@@ -52,6 +58,8 @@ static const struct {
     {"IZ", REG_IZ, SIZE_WORD}, {"SP", REG_SP, SIZE_WORD},
     {"QWA", REG_QWA, SIZE_WORD}, {"QBC", REG_QBC, SIZE_WORD},
     {"QDE", REG_QDE, SIZE_WORD}, {"QHL", REG_QHL, SIZE_WORD},
+    {"QIX", REG_QIX, SIZE_WORD}, {"QIY", REG_QIY, SIZE_WORD},
+    {"QIZ", REG_QIZ, SIZE_WORD},
     /* 32-bit registers */
     {"XWA", REG_XWA, SIZE_LONG}, {"XBC", REG_XBC, SIZE_LONG},
     {"XDE", REG_XDE, SIZE_LONG}, {"XHL", REG_XHL, SIZE_LONG},
