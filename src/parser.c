@@ -655,6 +655,22 @@ bool parse_line(Assembler *as, const char *line) {
         return true;
     }
 
+    /* If no operands and looks like a label (at start of line, no label yet),
+       treat as a label without colon - common in some assembler output */
+    if (operand_count == 0 && !label[0]) {
+        /* Check if this could be a label - must not contain special chars */
+        bool looks_like_label = true;
+        for (const char *p = mnemonic; *p && looks_like_label; p++) {
+            if (!isalnum((unsigned char)*p) && *p != '_') {
+                looks_like_label = false;
+            }
+        }
+        if (looks_like_label) {
+            symbol_define(as, mnemonic, SYM_LABEL, as->pc);
+            return true;
+        }
+    }
+
     /* Nothing worked - this is an unknown instruction/macro */
     error(as, "unknown instruction or macro: %s", mnemonic);
     return false;
