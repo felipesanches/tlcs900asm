@@ -2014,6 +2014,16 @@ static bool encode_div(Assembler *as, Operand *ops, int count) {
                 return true;
             }
         }
+        /* DIV XRR, RR - 32-bit / 16-bit */
+        if (dst->size == SIZE_LONG && src->size == SIZE_WORD) {
+            int dcode = get_reg32_code(dst->reg);
+            int scode = get_reg16_code(src->reg);
+            if (dcode >= 0 && scode >= 0) {
+                emit_byte(as, 0xD8 + scode);
+                emit_byte(as, 0x58 + dcode);
+                return true;
+            }
+        }
     }
 
     error(as, "unsupported DIV operand combination");
@@ -2051,6 +2061,16 @@ static bool encode_divs(Assembler *as, Operand *ops, int count) {
             if (dcode >= 0 && scode >= 0) {
                 emit_byte(as, 0xD8 + scode);
                 emit_byte(as, 0x58 + dcode);
+                return true;
+            }
+        }
+        /* DIVS XRR, RR - 32-bit / 16-bit signed */
+        if (dst->size == SIZE_LONG && src->size == SIZE_WORD) {
+            int dcode = get_reg32_code(dst->reg);
+            int scode = get_reg16_code(src->reg);
+            if (dcode >= 0 && scode >= 0) {
+                emit_byte(as, 0xD8 + scode);
+                emit_byte(as, 0x5C + dcode);
                 return true;
             }
         }
@@ -2880,12 +2900,22 @@ static bool encode_stcf(Assembler *as, Operand *ops, int count) {
 
     /* STCF n, reg - store CF to bit n of register */
     if (ops[0].mode == ADDR_IMMEDIATE && ops[1].mode == ADDR_REGISTER) {
-        int bit = (int)ops[0].value & 7;
         if (ops[1].size == SIZE_BYTE) {
+            int bit = (int)ops[0].value & 7;
             int code = get_reg8_code(ops[1].reg);
             if (code >= 0) {
                 emit_byte(as, 0xC8 + (code >> 1));
                 emit_byte(as, 0x30 + (code & 1));
+                emit_byte(as, bit);
+                return true;
+            }
+        }
+        if (ops[1].size == SIZE_WORD) {
+            int bit = (int)ops[0].value & 15;
+            int code = get_reg16_code(ops[1].reg);
+            if (code >= 0) {
+                emit_byte(as, 0xE8 + code);
+                emit_byte(as, 0x10);
                 emit_byte(as, bit);
                 return true;
             }
