@@ -2618,6 +2618,30 @@ static bool encode_andw(Assembler *as, Operand *ops, int count) {
     return false;
 }
 
+/* XORW - XOR Word (memory) */
+static bool encode_xorw(Assembler *as, Operand *ops, int count) {
+    if (count < 2) {
+        error(as, "XORW requires two operands");
+        return false;
+    }
+
+    Operand *dst = &ops[0];
+    Operand *src = &ops[1];
+
+    /* XORW (mem), imm16 */
+    if ((dst->mode == ADDR_DIRECT || dst->mode == ADDR_REGISTER_IND ||
+         dst->mode == ADDR_INDEXED) && src->mode == ADDR_IMMEDIATE) {
+        emit_byte(as, 0x90);  /* Word memory prefix */
+        emit_mem_operand(as, dst);
+        emit_byte(as, 0x28);  /* XOR opcode */
+        emit_word(as, (uint16_t)src->value);
+        return true;
+    }
+
+    error(as, "unsupported XORW operand combination");
+    return false;
+}
+
 /* ADDW - ADD Word (memory) */
 static bool encode_addw(Assembler *as, Operand *ops, int count) {
     if (count < 2) {
@@ -3140,6 +3164,208 @@ static bool encode_stcf(Assembler *as, Operand *ops, int count) {
     return false;
 }
 
+/* LDCF - Load Carry Flag from bit */
+static bool encode_ldcf(Assembler *as, Operand *ops, int count) {
+    if (count < 2) {
+        error(as, "LDCF requires bit and operand");
+        return false;
+    }
+
+    /* LDCF A, (mem) - load bit specified by A into CF */
+    if (ops[0].mode == ADDR_REGISTER && ops[0].reg == REG_A) {
+        if (ops[1].mode == ADDR_DIRECT || ops[1].mode == ADDR_REGISTER_IND ||
+            ops[1].mode == ADDR_INDEXED) {
+            emit_byte(as, 0xB0);
+            emit_mem_operand(as, &ops[1]);
+            emit_byte(as, 0xC2);
+            return true;
+        }
+    }
+
+    /* LDCF n, R - load bit n of register R into CF */
+    if (ops[0].mode == ADDR_IMMEDIATE && ops[1].mode == ADDR_REGISTER) {
+        if (ops[1].size == SIZE_BYTE) {
+            int bit = (int)ops[0].value & 7;
+            int code = get_reg8_code(ops[1].reg);
+            if (code >= 0) {
+                emit_byte(as, 0xC8 + (code >> 1));
+                emit_byte(as, 0x33);
+                emit_byte(as, bit);
+                return true;
+            }
+        }
+        if (ops[1].size == SIZE_WORD) {
+            int bit = (int)ops[0].value & 15;
+            int code = get_reg16_code(ops[1].reg);
+            if (code >= 0) {
+                emit_byte(as, 0xD8 + code);
+                emit_byte(as, 0x33);
+                emit_byte(as, bit);
+                return true;
+            }
+        }
+        if (ops[1].size == SIZE_LONG) {
+            int bit = (int)ops[0].value & 31;
+            int code = get_reg32_code(ops[1].reg);
+            if (code >= 0) {
+                emit_byte(as, 0xE8 + code);
+                emit_byte(as, 0x33);
+                emit_byte(as, bit);
+                return true;
+            }
+        }
+    }
+
+    /* LDCF n, (mem) - load bit n of memory into CF */
+    if (ops[0].mode == ADDR_IMMEDIATE &&
+        (ops[1].mode == ADDR_DIRECT || ops[1].mode == ADDR_REGISTER_IND ||
+         ops[1].mode == ADDR_INDEXED)) {
+        int bit = (int)ops[0].value & 7;
+        emit_byte(as, 0xB0);
+        emit_mem_operand(as, &ops[1]);
+        emit_byte(as, 0xC3);
+        emit_byte(as, bit);
+        return true;
+    }
+
+    error(as, "unsupported LDCF operand");
+    return false;
+}
+
+/* XORCF - XOR Carry Flag with bit */
+static bool encode_xorcf(Assembler *as, Operand *ops, int count) {
+    if (count < 2) {
+        error(as, "XORCF requires bit and operand");
+        return false;
+    }
+
+    /* XORCF A, (mem) - XOR bit specified by A with CF */
+    if (ops[0].mode == ADDR_REGISTER && ops[0].reg == REG_A) {
+        if (ops[1].mode == ADDR_DIRECT || ops[1].mode == ADDR_REGISTER_IND ||
+            ops[1].mode == ADDR_INDEXED) {
+            emit_byte(as, 0xB0);
+            emit_mem_operand(as, &ops[1]);
+            emit_byte(as, 0xC6);
+            return true;
+        }
+    }
+
+    /* XORCF n, R - XOR bit n of register R with CF */
+    if (ops[0].mode == ADDR_IMMEDIATE && ops[1].mode == ADDR_REGISTER) {
+        if (ops[1].size == SIZE_BYTE) {
+            int bit = (int)ops[0].value & 7;
+            int code = get_reg8_code(ops[1].reg);
+            if (code >= 0) {
+                emit_byte(as, 0xC8 + (code >> 1));
+                emit_byte(as, 0x37);
+                emit_byte(as, bit);
+                return true;
+            }
+        }
+        if (ops[1].size == SIZE_WORD) {
+            int bit = (int)ops[0].value & 15;
+            int code = get_reg16_code(ops[1].reg);
+            if (code >= 0) {
+                emit_byte(as, 0xD8 + code);
+                emit_byte(as, 0x37);
+                emit_byte(as, bit);
+                return true;
+            }
+        }
+        if (ops[1].size == SIZE_LONG) {
+            int bit = (int)ops[0].value & 31;
+            int code = get_reg32_code(ops[1].reg);
+            if (code >= 0) {
+                emit_byte(as, 0xE8 + code);
+                emit_byte(as, 0x37);
+                emit_byte(as, bit);
+                return true;
+            }
+        }
+    }
+
+    /* XORCF n, (mem) - XOR bit n of memory with CF */
+    if (ops[0].mode == ADDR_IMMEDIATE &&
+        (ops[1].mode == ADDR_DIRECT || ops[1].mode == ADDR_REGISTER_IND ||
+         ops[1].mode == ADDR_INDEXED)) {
+        int bit = (int)ops[0].value & 7;
+        emit_byte(as, 0xB0);
+        emit_mem_operand(as, &ops[1]);
+        emit_byte(as, 0xC7);
+        emit_byte(as, bit);
+        return true;
+    }
+
+    error(as, "unsupported XORCF operand");
+    return false;
+}
+
+/* BS1B - Bit Search 1 Backward */
+static bool encode_bs1b(Assembler *as, Operand *ops, int count) {
+    if (count < 2) {
+        error(as, "BS1B requires destination and source");
+        return false;
+    }
+
+    /* BS1B A, r16 - search for first 1 bit from MSB in 16-bit reg */
+    if (ops[0].mode == ADDR_REGISTER && ops[0].reg == REG_A &&
+        ops[1].mode == ADDR_REGISTER && ops[1].size == SIZE_WORD) {
+        int code = get_reg16_code(ops[1].reg);
+        if (code >= 0) {
+            emit_byte(as, 0xD8 + code);
+            emit_byte(as, 0x0F);
+            return true;
+        }
+    }
+
+    /* BS1B A, r32 - search for first 1 bit from MSB in 32-bit reg */
+    if (ops[0].mode == ADDR_REGISTER && ops[0].reg == REG_A &&
+        ops[1].mode == ADDR_REGISTER && ops[1].size == SIZE_LONG) {
+        int code = get_reg32_code(ops[1].reg);
+        if (code >= 0) {
+            emit_byte(as, 0xE8 + code);
+            emit_byte(as, 0x0F);
+            return true;
+        }
+    }
+
+    error(as, "unsupported BS1B operand");
+    return false;
+}
+
+/* BS1F - Bit Search 1 Forward */
+static bool encode_bs1f(Assembler *as, Operand *ops, int count) {
+    if (count < 2) {
+        error(as, "BS1F requires destination and source");
+        return false;
+    }
+
+    /* BS1F A, r16 - search for first 1 bit from LSB in 16-bit reg */
+    if (ops[0].mode == ADDR_REGISTER && ops[0].reg == REG_A &&
+        ops[1].mode == ADDR_REGISTER && ops[1].size == SIZE_WORD) {
+        int code = get_reg16_code(ops[1].reg);
+        if (code >= 0) {
+            emit_byte(as, 0xD8 + code);
+            emit_byte(as, 0x0E);
+            return true;
+        }
+    }
+
+    /* BS1F A, r32 - search for first 1 bit from LSB in 32-bit reg */
+    if (ops[0].mode == ADDR_REGISTER && ops[0].reg == REG_A &&
+        ops[1].mode == ADDR_REGISTER && ops[1].size == SIZE_LONG) {
+        int code = get_reg32_code(ops[1].reg);
+        if (code >= 0) {
+            emit_byte(as, 0xE8 + code);
+            emit_byte(as, 0x0E);
+            return true;
+        }
+    }
+
+    error(as, "unsupported BS1F operand");
+    return false;
+}
+
 /* ============== Extension Instructions ============== */
 
 /* EXTZ - Extend with zeros */
@@ -3321,6 +3547,7 @@ static const struct {
     {"OR", encode_or},
     {"ORW", encode_orw},
     {"XOR", encode_xor},
+    {"XORW", encode_xorw},
     {"CPL", encode_cpl},
     {"ADDW", encode_addw},
 
@@ -3341,6 +3568,10 @@ static const struct {
     {"TSET", encode_tset},
     {"CHG", encode_chg},
     {"STCF", encode_stcf},
+    {"LDCF", encode_ldcf},
+    {"XORCF", encode_xorcf},
+    {"BS1B", encode_bs1b},
+    {"BS1F", encode_bs1f},
 
     /* Extension */
     {"EXTZ", encode_extz},
