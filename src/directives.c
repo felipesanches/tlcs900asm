@@ -69,8 +69,8 @@ static char *parse_string_arg(void) {
 /* Handle ORG directive */
 static bool handle_org(Assembler *as) {
     int64_t value;
-    bool known;
-    if (!expr_parse(as, &value, &known)) {
+    bool known, is_const;
+    if (!expr_parse(as, &value, &known, &is_const)) {
         error(as, "invalid ORG expression");
         return false;
     }
@@ -91,8 +91,8 @@ static bool handle_equ(Assembler *as, const char *label) {
         return false;
     }
     int64_t value;
-    bool known;
-    if (!expr_parse(as, &value, &known)) {
+    bool known, is_const;
+    if (!expr_parse(as, &value, &known, &is_const)) {
         error(as, "invalid EQU expression");
         return false;
     }
@@ -107,8 +107,8 @@ static bool handle_set(Assembler *as, const char *label) {
         return false;
     }
     int64_t value;
-    bool known;
-    if (!expr_parse(as, &value, &known)) {
+    bool known, is_const;
+    if (!expr_parse(as, &value, &known, &is_const)) {
         error(as, "invalid SET expression");
         return false;
     }
@@ -132,8 +132,8 @@ static bool handle_db(Assembler *as) {
         } else {
             /* Expression */
             int64_t value;
-            bool known;
-            if (!expr_parse(as, &value, &known)) {
+            bool known, is_const;
+            if (!expr_parse(as, &value, &known, &is_const)) {
                 error(as, "invalid DB expression");
                 return false;
             }
@@ -156,8 +156,8 @@ static bool handle_db(Assembler *as) {
 static bool handle_dw(Assembler *as) {
     do {
         int64_t value;
-        bool known;
-        if (!expr_parse(as, &value, &known)) {
+        bool known, is_const;
+        if (!expr_parse(as, &value, &known, &is_const)) {
             error(as, "invalid DW expression");
             return false;
         }
@@ -179,8 +179,8 @@ static bool handle_dw(Assembler *as) {
 static bool handle_dd(Assembler *as) {
     do {
         int64_t value;
-        bool known;
-        if (!expr_parse(as, &value, &known)) {
+        bool known, is_const;
+        if (!expr_parse(as, &value, &known, &is_const)) {
             error(as, "invalid DD expression");
             return false;
         }
@@ -201,8 +201,8 @@ static bool handle_dd(Assembler *as) {
 /* Handle DS (define space) directive */
 static bool handle_ds(Assembler *as) {
     int64_t count;
-    bool known;
-    if (!expr_parse(as, &count, &known)) {
+    bool known, is_const;
+    if (!expr_parse(as, &count, &known, &is_const)) {
         error(as, "invalid DS expression");
         return false;
     }
@@ -212,7 +212,7 @@ static bool handle_ds(Assembler *as) {
     if (tok.type == TOK_COMMA) {
         lexer_next();
         int64_t fill_val;
-        if (!expr_parse(as, &fill_val, &known)) {
+        if (!expr_parse(as, &fill_val, &known, &is_const)) {
             error(as, "invalid DS fill value");
             return false;
         }
@@ -226,8 +226,8 @@ static bool handle_ds(Assembler *as) {
 /* Handle ALIGN directive */
 static bool handle_align(Assembler *as) {
     int64_t boundary;
-    bool known;
-    if (!expr_parse(as, &boundary, &known)) {
+    bool known, is_const;
+    if (!expr_parse(as, &boundary, &known, &is_const)) {
         error(as, "invalid ALIGN expression");
         return false;
     }
@@ -279,12 +279,12 @@ static bool handle_binclude(Assembler *as) {
     /* Optional offset and length */
     int64_t offset = 0;
     int64_t length = -1;
-    bool known;
+    bool known, is_const;
 
     tok = lexer_peek();
     if (tok.type == TOK_COMMA) {
         lexer_next();
-        if (!expr_parse(as, &offset, &known)) {
+        if (!expr_parse(as, &offset, &known, &is_const)) {
             free(filename);
             error(as, "invalid BINCLUDE offset");
             return false;
@@ -293,7 +293,7 @@ static bool handle_binclude(Assembler *as) {
         tok = lexer_peek();
         if (tok.type == TOK_COMMA) {
             lexer_next();
-            if (!expr_parse(as, &length, &known)) {
+            if (!expr_parse(as, &length, &known, &is_const)) {
                 free(filename);
                 error(as, "invalid BINCLUDE length");
                 return false;
@@ -502,8 +502,8 @@ bool handle_directive(Assembler *as, const char *directive, const char *label) {
         return handle_dd(as);
     }
     if (is_directive(directive, "DS") || is_directive(directive, "DEFS") ||
-        is_directive(directive, "RMB") || is_directive(directive, "RES") ||
-        is_directive(directive, ".BLKB")) {
+        is_directive(directive, "RMB") || is_directive(directive, ".BLKB")) {
+        /* Note: "RES" removed - conflicts with RES instruction (reset bit) */
         return handle_ds(as);
     }
     if (is_directive(directive, "ALIGN")) {

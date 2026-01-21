@@ -120,6 +120,7 @@ static bool is_control_register(const char *name) {
         "DMAD0", "DMAD1", "DMAD2", "DMAD3",
         "DMAC0", "DMAC1", "DMAC2", "DMAC3",
         "DMAM0", "DMAM1", "DMAM2", "DMAM3",
+        "INTNEST",
         NULL
     };
     for (int i = 0; ctrl_regs[i]; i++) {
@@ -187,13 +188,14 @@ static bool parse_operand_internal(Assembler *as, Operand *op) {
                     } else {
                         /* (reg + expr) - displacement indexed */
                         int64_t offset;
-                        bool known;
-                        if (!expr_parse(as, &offset, &known)) {
+                        bool known, is_const;
+                        if (!expr_parse(as, &offset, &known, &is_const)) {
                             error(as, "invalid indexed offset");
                             return false;
                         }
                         op->value = offset;
                         op->value_known = known;
+                        op->is_constant = is_const;
                         op->index_reg = REG_NONE;
                     }
                     tok = lexer_peek();
@@ -222,13 +224,14 @@ static bool parse_operand_internal(Assembler *as, Operand *op) {
                 if (tok.type == TOK_MINUS) {
                     lexer_next();
                     int64_t offset;
-                    bool known;
-                    if (!expr_parse(as, &offset, &known)) {
+                    bool known, is_const;
+                    if (!expr_parse(as, &offset, &known, &is_const)) {
                         error(as, "invalid indexed offset");
                         return false;
                     }
                     op->value = -offset;
                     op->value_known = known;
+                    op->is_constant = is_const;
                     tok = lexer_peek();
                     /* Check for :8/:16/:24 size suffix inside parentheses */
                     if (tok.type == TOK_COLON) {
@@ -290,13 +293,14 @@ static bool parse_operand_internal(Assembler *as, Operand *op) {
 
         /* (expression) - direct memory addressing */
         int64_t addr;
-        bool known;
-        if (!expr_parse(as, &addr, &known)) {
+        bool known, is_const;
+        if (!expr_parse(as, &addr, &known, &is_const)) {
             error(as, "invalid address expression");
             return false;
         }
         op->value = addr;
         op->value_known = known;
+        op->is_constant = is_const;
 
         tok = lexer_peek();
         /* Check for :8/:16/:24 size suffix inside parentheses */
@@ -392,8 +396,8 @@ static bool parse_operand_internal(Assembler *as, Operand *op) {
                 }
                 /* Otherwise it's reg + displacement */
                 int64_t offset;
-                bool known;
-                if (!expr_parse(as, &offset, &known)) {
+                bool known, is_const;
+                if (!expr_parse(as, &offset, &known, &is_const)) {
                     error(as, "invalid displacement after register");
                     return false;
                 }
@@ -402,6 +406,7 @@ static bool parse_operand_internal(Assembler *as, Operand *op) {
                 op->size = size;
                 op->value = offset;
                 op->value_known = known;
+                op->is_constant = is_const;
                 op->index_reg = REG_NONE;
                 return true;
             }
@@ -438,8 +443,8 @@ static bool parse_operand_internal(Assembler *as, Operand *op) {
     }
 
     int64_t value;
-    bool known;
-    if (!expr_parse(as, &value, &known)) {
+    bool known, is_const;
+    if (!expr_parse(as, &value, &known, &is_const)) {
         error(as, "invalid operand");
         return false;
     }
@@ -447,6 +452,7 @@ static bool parse_operand_internal(Assembler *as, Operand *op) {
     op->mode = ADDR_IMMEDIATE;
     op->value = value;
     op->value_known = known;
+    op->is_constant = is_const;
     return true;
 
 check_addr_size:
@@ -572,8 +578,8 @@ bool parse_line(Assembler *as, const char *line) {
             lexer_next();
         }
         int64_t value;
-        bool known;
-        if (!expr_parse(as, &value, &known)) {
+        bool known, is_const;
+        if (!expr_parse(as, &value, &known, &is_const)) {
             error(as, "invalid expression after =");
             return false;
         }

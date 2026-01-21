@@ -151,6 +151,7 @@ typedef struct {
     RegisterType index_reg;     /* For indexed addressing */
     int64_t value;              /* Immediate/displacement value */
     bool value_known;           /* Is value resolved? */
+    bool is_constant;           /* True if value from literal/EQU, false if from label */
     char symbol[MAX_IDENTIFIER]; /* Unresolved symbol name */
     int addr_size;              /* :8, :16, :24 suffix */
 } Operand;
@@ -251,7 +252,7 @@ Symbol *symbol_define(Assembler *as, const char *name, SymbolType type, int64_t 
 bool symbol_is_defined(Assembler *as, const char *name);
 
 /* Expressions */
-bool expr_parse(Assembler *as, int64_t *result, bool *known);
+bool expr_parse(Assembler *as, int64_t *result, bool *known, bool *is_constant);
 
 /* Parser */
 bool parse_line(Assembler *as, const char *line);

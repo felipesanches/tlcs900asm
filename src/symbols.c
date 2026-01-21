@@ -142,6 +142,15 @@ bool symbol_get_value(Assembler *as, const char *name, int64_t *value) {
     return sym->defined;
 }
 
+/* Get symbol type - returns SYM_LABEL if not found */
+SymbolType symbol_get_type(Assembler *as, const char *name) {
+    Symbol *sym = symbol_lookup(as, name);
+    if (!sym) {
+        return SYM_LABEL;  /* Assume label for unknown symbols */
+    }
+    return sym->type;
+}
+
 /* Define a macro */
 Symbol *symbol_define_macro(Assembler *as, const char *name,
                             char **params, int param_count,

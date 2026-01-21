@@ -186,10 +186,18 @@ static bool emit_mem_operand(Assembler *as, Operand *op) {
             int addr = (int)op->value;
             int addr_size = op->addr_size;
             if (addr_size == 0) {
-                /* Auto-detect size */
-                if (addr <= 0xFF) addr_size = 8;
-                else if (addr <= 0xFFFF) addr_size = 16;
-                else addr_size = 24;
+                /* Use optimal sizing based on actual value.
+                 * Note: This may cause issues with forward references if their value
+                 * changes size between passes. The assembler will report errors in
+                 * such cases (e.g., JR offset out of range).
+                 */
+                if (addr <= 0xFF) {
+                    addr_size = 8;
+                } else if (addr <= 0xFFFF) {
+                    addr_size = 16;
+                } else {
+                    addr_size = 24;
+                }
             }
             switch (addr_size) {
                 case 8:
@@ -898,11 +906,13 @@ static bool encode_lda(Assembler *as, Operand *ops, int count) {
         /* Check if there's an offset operand */
         if (ops[2].mode == ADDR_IMMEDIATE) {
             Operand indexed_op;
+            memset(&indexed_op, 0, sizeof(indexed_op));
             indexed_op.mode = ADDR_INDEXED;
             indexed_op.reg = src->reg;
             indexed_op.size = src->size;
             indexed_op.value = ops[2].value;
             indexed_op.value_known = ops[2].value_known;
+            indexed_op.is_constant = ops[2].is_constant;
             emit_byte(as, 0xF5);
             emit_mem_operand(as, &indexed_op);
             emit_byte(as, 0x30 + dcode);
@@ -913,6 +923,7 @@ static bool encode_lda(Assembler *as, Operand *ops, int count) {
     /* LDA xrr, xrr (treat register as base for indirect) */
     if (src->mode == ADDR_REGISTER && src->size == SIZE_LONG) {
         Operand indirect_op;
+        memset(&indirect_op, 0, sizeof(indirect_op));
         indirect_op.mode = ADDR_REGISTER_IND;
         indirect_op.reg = src->reg;
         indirect_op.size = src->size;
@@ -926,54 +937,122 @@ static bool encode_lda(Assembler *as, Operand *ops, int count) {
     return false;
 }
 
-/* Get control register code for LDC/STC instructions */
-static int get_ctrl_reg_code(const char *name) {
-    /* DMA Source registers */
+/* Get control register code for LDC/STC instructions
+ * Note: The control register code depends on the operand size:
+ * - For 32-bit (XWA, etc): use base code
+ * - For 16-bit (WA, etc): same as 32-bit (register is word-sized)
+ * - For 8-bit (A, etc): add 2 to the base code for count/mode regs
+ */
+static int get_ctrl_reg_code(const char *name, int size) {
+    /* DMA Source registers (32-bit) */
     if (strcasecmp(name, "DMAS0") == 0) return 0x00;
     if (strcasecmp(name, "DMAS1") == 0) return 0x04;
     if (strcasecmp(name, "DMAS2") == 0) return 0x08;
     if (strcasecmp(name, "DMAS3") == 0) return 0x0C;
-    /* DMA Destination registers */
-    if (strcasecmp(name, "DMAD0") == 0) return 0x01;
-    if (strcasecmp(name, "DMAD1") == 0) return 0x05;
-    if (strcasecmp(name, "DMAD2") == 0) return 0x09;
-    if (strcasecmp(name, "DMAD3") == 0) return 0x0D;
-    /* DMA Count registers */
-    if (strcasecmp(name, "DMAC0") == 0) return 0x02;
-    if (strcasecmp(name, "DMAC1") == 0) return 0x06;
-    if (strcasecmp(name, "DMAC2") == 0) return 0x0A;
-    if (strcasecmp(name, "DMAC3") == 0) return 0x0E;
-    /* DMA Mode registers */
-    if (strcasecmp(name, "DMAM0") == 0) return 0x03;
-    if (strcasecmp(name, "DMAM1") == 0) return 0x07;
-    if (strcasecmp(name, "DMAM2") == 0) return 0x0B;
-    if (strcasecmp(name, "DMAM3") == 0) return 0x0F;
+    /* DMA Destination registers (32-bit) */
+    if (strcasecmp(name, "DMAD0") == 0) return 0x20;
+    if (strcasecmp(name, "DMAD1") == 0) return 0x24;
+    if (strcasecmp(name, "DMAD2") == 0) return 0x28;
+    if (strcasecmp(name, "DMAD3") == 0) return 0x2C;
+    /* DMA Count registers (16-bit base, +2 for 8-bit access) */
+    if (strcasecmp(name, "DMAC0") == 0) return (size == SIZE_BYTE) ? 0x42 : 0x40;
+    if (strcasecmp(name, "DMAC1") == 0) return (size == SIZE_BYTE) ? 0x46 : 0x44;
+    if (strcasecmp(name, "DMAC2") == 0) return (size == SIZE_BYTE) ? 0x4A : 0x48;
+    if (strcasecmp(name, "DMAC3") == 0) return (size == SIZE_BYTE) ? 0x4E : 0x4C;
+    /* DMA Mode registers (16-bit) */
+    if (strcasecmp(name, "DMAM0") == 0) return 0x40;
+    if (strcasecmp(name, "DMAM1") == 0) return 0x44;
+    if (strcasecmp(name, "DMAM2") == 0) return 0x48;
+    if (strcasecmp(name, "DMAM3") == 0) return 0x4C;
+    /* Interrupt nesting counter */
+    if (strcasecmp(name, "INTNEST") == 0) return 0x7C;
     return -1;
 }
 
 /* LDC - Load control register */
 static bool encode_ldc(Assembler *as, Operand *ops, int count) {
     if (count < 2) {
-        error(as, "LDC requires control register and source register");
+        error(as, "LDC requires control register and register operand");
         return false;
     }
 
-    /* LDC cr, R32 - load control register from 32-bit register */
-    /* First operand is the control register (parsed as immediate/symbol) */
     int cr_code = -1;
 
-    /* Check if first operand was parsed as immediate with symbol name */
+    /* LDC cr, reg - load control register from general register */
     if (ops[0].mode == ADDR_IMMEDIATE && ops[0].symbol[0] != '\0') {
-        cr_code = get_ctrl_reg_code(ops[0].symbol);
+        int reg_size = ops[1].size;
+        cr_code = get_ctrl_reg_code(ops[0].symbol, reg_size);
+
+        if (cr_code >= 0 && ops[1].mode == ADDR_REGISTER) {
+            /* 32-bit register source */
+            if (reg_size == SIZE_LONG) {
+                int reg_code = get_reg32_code(ops[1].reg);
+                if (reg_code >= 0) {
+                    emit_byte(as, 0xE8 + reg_code);
+                    emit_byte(as, 0x2E);
+                    emit_byte(as, (uint8_t)cr_code);
+                    return true;
+                }
+            }
+            /* 16-bit register source */
+            else if (reg_size == SIZE_WORD) {
+                int reg_code = get_reg16_code(ops[1].reg);
+                if (reg_code >= 0) {
+                    emit_byte(as, 0xD8 + reg_code);
+                    emit_byte(as, 0x2E);
+                    emit_byte(as, (uint8_t)cr_code);
+                    return true;
+                }
+            }
+            /* 8-bit register source */
+            else if (reg_size == SIZE_BYTE) {
+                int reg_code = get_reg8_code(ops[1].reg);
+                if (reg_code >= 0) {
+                    emit_byte(as, 0xC8 + reg_code);
+                    emit_byte(as, 0x2E);
+                    emit_byte(as, (uint8_t)cr_code);
+                    return true;
+                }
+            }
+        }
     }
 
-    if (cr_code >= 0 && ops[1].mode == ADDR_REGISTER && ops[1].size == SIZE_LONG) {
-        int reg_code = get_reg32_code(ops[1].reg);
-        if (reg_code >= 0) {
-            emit_byte(as, 0xE8 + reg_code);
-            emit_byte(as, 0x03);
-            emit_byte(as, (uint8_t)cr_code);
-            return true;
+    /* LDC reg, cr - load general register from control register */
+    if (ops[1].mode == ADDR_IMMEDIATE && ops[1].symbol[0] != '\0') {
+        int reg_size = ops[0].size;
+        cr_code = get_ctrl_reg_code(ops[1].symbol, reg_size);
+
+        if (cr_code >= 0 && ops[0].mode == ADDR_REGISTER) {
+            /* 32-bit register destination */
+            if (reg_size == SIZE_LONG) {
+                int reg_code = get_reg32_code(ops[0].reg);
+                if (reg_code >= 0) {
+                    emit_byte(as, 0xE8 + reg_code);
+                    emit_byte(as, 0x2F);
+                    emit_byte(as, (uint8_t)cr_code);
+                    return true;
+                }
+            }
+            /* 16-bit register destination */
+            else if (reg_size == SIZE_WORD) {
+                int reg_code = get_reg16_code(ops[0].reg);
+                if (reg_code >= 0) {
+                    emit_byte(as, 0xD8 + reg_code);
+                    emit_byte(as, 0x2F);
+                    emit_byte(as, (uint8_t)cr_code);
+                    return true;
+                }
+            }
+            /* 8-bit register destination */
+            else if (reg_size == SIZE_BYTE) {
+                int reg_code = get_reg8_code(ops[0].reg);
+                if (reg_code >= 0) {
+                    emit_byte(as, 0xC8 + reg_code);
+                    emit_byte(as, 0x2F);
+                    emit_byte(as, (uint8_t)cr_code);
+                    return true;
+                }
+            }
         }
     }
 
@@ -3012,9 +3091,19 @@ static bool encode_bit(Assembler *as, Operand *ops, int count) {
         }
     }
 
-    /* BIT n, (mem) */
-    if (ops[1].mode == ADDR_DIRECT || ops[1].mode == ADDR_REGISTER_IND ||
-        ops[1].mode == ADDR_INDEXED) {
+    /* BIT n, (mem) - simple register indirect (XWA/XBC/XDE/XHL/XIX/XIY/XIZ/XSP) */
+    if (ops[1].mode == ADDR_REGISTER_IND) {
+        int code = get_reg32_code(ops[1].reg);
+        if (code >= 0 && code <= 7) {
+            int bit = (int)ops[0].value & 7;
+            emit_byte(as, 0xB0 + code);
+            emit_byte(as, 0xC0 + bit);
+            return true;
+        }
+    }
+
+    /* BIT n, (mem) - other memory operands */
+    if (ops[1].mode == ADDR_DIRECT || ops[1].mode == ADDR_INDEXED) {
         int bit = (int)ops[0].value & 7;
         emit_byte(as, 0xB0);
         emit_mem_operand(as, &ops[1]);
@@ -3056,9 +3145,19 @@ static bool encode_set(Assembler *as, Operand *ops, int count) {
         }
     }
 
-    /* SET n, (mem) */
-    if (ops[1].mode == ADDR_DIRECT || ops[1].mode == ADDR_REGISTER_IND ||
-        ops[1].mode == ADDR_INDEXED) {
+    /* SET n, (mem) - simple register indirect (XWA/XBC/XDE/XHL/XIX/XIY/XIZ/XSP) */
+    if (ops[1].mode == ADDR_REGISTER_IND) {
+        int code = get_reg32_code(ops[1].reg);
+        if (code >= 0 && code <= 7) {
+            int bit = (int)ops[0].value & 7;
+            emit_byte(as, 0xB0 + code);
+            emit_byte(as, 0xA0 + bit);
+            return true;
+        }
+    }
+
+    /* SET n, (mem) - other memory operands */
+    if (ops[1].mode == ADDR_DIRECT || ops[1].mode == ADDR_INDEXED) {
         int bit = (int)ops[0].value & 7;
         emit_byte(as, 0xB0);
         emit_mem_operand(as, &ops[1]);
@@ -3081,9 +3180,10 @@ static bool encode_res(Assembler *as, Operand *ops, int count) {
         if (ops[1].size == SIZE_BYTE) {
             int bit = (int)ops[0].value & 7;
             int code = get_reg8_code(ops[1].reg);
-            if (code >= 0) {
-                emit_byte(as, 0xC8 + (code >> 1));
-                emit_byte(as, 0x78 + (code & 1));
+            if (code >= 0 && code < 8) {
+                /* Per-register prefix encoding for current bank: Cz 30 bit */
+                emit_byte(as, 0xC8 + code);
+                emit_byte(as, 0x30);
                 emit_byte(as, bit);
                 return true;
             }
@@ -3100,9 +3200,19 @@ static bool encode_res(Assembler *as, Operand *ops, int count) {
         }
     }
 
-    /* RES n, (mem) */
-    if (ops[1].mode == ADDR_DIRECT || ops[1].mode == ADDR_REGISTER_IND ||
-        ops[1].mode == ADDR_INDEXED) {
+    /* RES n, (mem) - simple register indirect (XWA/XBC/XDE/XHL/XIX/XIY/XIZ/XSP) */
+    if (ops[1].mode == ADDR_REGISTER_IND) {
+        int code = get_reg32_code(ops[1].reg);
+        if (code >= 0 && code <= 7) {
+            int bit = (int)ops[0].value & 7;
+            emit_byte(as, 0xB0 + code);
+            emit_byte(as, 0xB0 + bit);
+            return true;
+        }
+    }
+
+    /* RES n, (mem) - other memory operands */
+    if (ops[1].mode == ADDR_DIRECT || ops[1].mode == ADDR_INDEXED) {
         int bit = (int)ops[0].value & 7;
         emit_byte(as, 0xB0);
         emit_mem_operand(as, &ops[1]);
