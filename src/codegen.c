@@ -2545,16 +2545,26 @@ static bool encode_inc(Assembler *as, Operand *ops, int count) {
             int code = get_reg16_code(target->reg);
             if (code >= 0) {
                 emit_byte(as, 0xD8 + code);
-                emit_byte(as, 0x60);
-                emit_byte(as, (uint8_t)inc_val);
+                /* Compact encoding: 0x61-0x68 for INC 1-8 */
+                if (inc_val >= 1 && inc_val <= 8) {
+                    emit_byte(as, 0x60 + inc_val);
+                } else {
+                    emit_byte(as, 0x60);
+                    emit_byte(as, (uint8_t)inc_val);
+                }
                 return true;
             }
         } else if (target->size == SIZE_LONG) {
             int code = get_reg32_code(target->reg);
             if (code >= 0) {
                 emit_byte(as, 0xE8 + code);
-                emit_byte(as, 0x60);
-                emit_byte(as, (uint8_t)inc_val);
+                /* Compact encoding: 0x61-0x68 for INC 1-8 */
+                if (inc_val >= 1 && inc_val <= 8) {
+                    emit_byte(as, 0x60 + inc_val);
+                } else {
+                    emit_byte(as, 0x60);
+                    emit_byte(as, (uint8_t)inc_val);
+                }
                 return true;
             }
         }
@@ -2616,16 +2626,26 @@ static bool encode_dec(Assembler *as, Operand *ops, int count) {
             int code = get_reg16_code(target->reg);
             if (code >= 0) {
                 emit_byte(as, 0xD8 + code);
-                emit_byte(as, 0x68);
-                emit_byte(as, (uint8_t)dec_val);
+                /* Compact encoding: 0x69-0x70 for DEC 1-8 */
+                if (dec_val >= 1 && dec_val <= 8) {
+                    emit_byte(as, 0x68 + dec_val);
+                } else {
+                    emit_byte(as, 0x68);
+                    emit_byte(as, (uint8_t)dec_val);
+                }
                 return true;
             }
         } else if (target->size == SIZE_LONG) {
             int code = get_reg32_code(target->reg);
             if (code >= 0) {
                 emit_byte(as, 0xE8 + code);
-                emit_byte(as, 0x68);
-                emit_byte(as, (uint8_t)dec_val);
+                /* Compact encoding: 0x69-0x70 for DEC 1-8 */
+                if (dec_val >= 1 && dec_val <= 8) {
+                    emit_byte(as, 0x68 + dec_val);
+                } else {
+                    emit_byte(as, 0x68);
+                    emit_byte(as, (uint8_t)dec_val);
+                }
                 return true;
             }
         }
