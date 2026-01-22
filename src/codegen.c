@@ -846,6 +846,12 @@ static bool encode_ld(Assembler *as, Operand *ops, int count) {
         } else if (dst->size == SIZE_WORD) {
             int code = get_reg16_code(dst->reg);
             if (code >= 0 && code < 8) {
+                /* Special 2-byte encoding for LD rr, 0 (codes 0-6: WA-IZ) */
+                if (src->value == 0 && code < 7) {
+                    emit_byte(as, 0xD8 + code);
+                    emit_byte(as, 0xA8);
+                    return true;
+                }
                 /* Compact form: 0x30 + code for WA, BC, DE, HL, IX, IY, IZ, SP */
                 emit_byte(as, 0x30 + code);
                 emit_word(as, (uint16_t)src->value);
