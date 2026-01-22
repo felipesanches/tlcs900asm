@@ -73,11 +73,11 @@ void emit_byte(Assembler *as, uint8_t b) {
 
     size_t offset = pc_to_offset(as, as->pc);
 
-    /* Extend buffer with zeros if needed */
+    /* Extend buffer with 0xFF if needed (matches ASL behavior) */
     if (offset >= as->output_size) {
         size_t gap = offset - as->output_size + 1;
         ensure_capacity(as, gap);
-        memset(as->output + as->output_size, 0, gap);
+        memset(as->output + as->output_size, 0xFF, gap);
         as->output_size = offset + 1;
     } else {
         ensure_capacity(as, 1);
