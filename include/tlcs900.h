@@ -223,6 +223,7 @@ typedef struct {
 
     /* Pass tracking */
     int pass;                   /* 1 or 2 */
+    bool sizing_pass;           /* True during initial pass with conservative sizes */
     bool errors;
     int error_count;
     int warning_count;

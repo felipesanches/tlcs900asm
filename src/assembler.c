@@ -93,7 +93,7 @@ static bool process_file(Assembler *as, const char *filename) {
         }
 
         /* Check for too many errors */
-        if (as->error_count > 100) {
+        if (as->error_count > 10000) {
             error(as, "too many errors, stopping");
             break;
         }
@@ -110,24 +110,62 @@ static bool process_file(Assembler *as, const char *filename) {
 
 /* Assemble a file (main entry point) */
 bool assembler_assemble_file(Assembler *as, const char *filename) {
-    /* Pass 1: Collect symbols */
-    if (as->verbose) {
-        printf("Pass 1: %s\n", filename);
+    /*
+     * Multi-pass assembly to handle forward references correctly:
+     *
+     * Pass 1 (first iteration): Collect symbols, forward refs get max sizes
+     * Pass 1 (iterations 2+): Recalculate with known values until stable
+     * Pass 2: Generate code with final, stable sizes
+     *
+     * This iterative approach ensures that instruction sizes are consistent
+     * and all labels have correct addresses for optimal sizing.
+     */
+
+    bool had_pass1_errors = false;
+    uint32_t last_pc = 0;
+    int iteration = 0;
+    const int MAX_ITERATIONS = 10;
+
+    /* Iterative pass 1: repeat until addresses stabilize */
+    do {
+        iteration++;
+        if (as->verbose) {
+            printf("Pass 1 (iteration %d): %s\n", iteration, filename);
+        }
+
+        as->pass = 1;
+        as->sizing_pass = (iteration == 1);  /* Conservative only on first iteration */
+        as->pc = 0;
+        as->org = 0;
+        as->errors = false;
+        as->error_count = 0;
+
+        if (!process_file(as, filename)) {
+            return false;
+        }
+
+        if (as->errors) {
+            had_pass1_errors = true;
+        }
+
+        /* Check if PC changed from last iteration */
+        if (iteration > 1 && as->pc == last_pc) {
+            if (as->verbose) {
+                printf("  Sizes stabilized at iteration %d (PC=%u)\n", iteration, as->pc);
+            }
+            break;
+        }
+
+        last_pc = as->pc;
+
+    } while (iteration < MAX_ITERATIONS);
+
+    if (iteration >= MAX_ITERATIONS) {
+        fprintf(stderr, "Warning: sizes did not stabilize after %d iterations\n", MAX_ITERATIONS);
     }
 
-    as->pass = 1;
-    as->pc = 0;
-    as->org = 0;
-    as->errors = false;
-    as->error_count = 0;
-
-    if (!process_file(as, filename)) {
-        return false;
-    }
-
-    bool had_pass1_errors = as->errors;
     if (had_pass1_errors) {
-        fprintf(stderr, "Pass 1 had %d errors, continuing to pass 2...\n", as->error_count);
+        fprintf(stderr, "Pass 1 had errors, continuing to pass 2...\n");
     }
 
     /* Pass 2: Generate code */
@@ -136,6 +174,7 @@ bool assembler_assemble_file(Assembler *as, const char *filename) {
     }
 
     as->pass = 2;
+    as->sizing_pass = false;
     as->pc = 0;
     as->org = 0;
     as->errors = false;

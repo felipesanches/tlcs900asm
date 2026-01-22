@@ -92,12 +92,31 @@ Symbol *symbol_define(Assembler *as, const char *name, SymbolType type, int64_t 
             existing->type = type;
             return existing;
         }
-        if (existing->defined && as->pass == 1) {
+        if (existing->type == SYM_MACRO && type == SYM_MACRO) {
+            /* Macros can be silently redefined with same type (for multi-pass) */
+            return existing;
+        }
+        if (existing->type == type && type == SYM_LABEL) {
+            /* Labels can be updated in multiple pass 1 iterations */
+            existing->value = value;
+            return existing;
+        }
+        if (existing->type == type && type == SYM_EQU) {
+            /* EQU symbols can be silently redefined with same value in pass 1 */
+            if (existing->value != value && as->pass == 1 && !as->sizing_pass) {
+                error(as, "symbol '%s' already defined with different value at %s:%d",
+                      name, existing->definition_file, existing->definition_line);
+                return NULL;
+            }
+            return existing;
+        }
+        if (existing->defined && as->pass == 1 && as->sizing_pass) {
+            /* First pass 1 - error on redefinition */
             error(as, "symbol '%s' already defined at %s:%d",
                   name, existing->definition_file, existing->definition_line);
             return NULL;
         }
-        /* Update value in pass 2 */
+        /* Update value in subsequent passes */
         existing->value = value;
         existing->defined = true;
         return existing;
