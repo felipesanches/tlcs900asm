@@ -638,11 +638,12 @@ static bool encode_jr(Assembler *as, Operand *ops, int count) {
 
     int64_t offset = target->value - (as->pc + 2);
 
-    /* On pass 1, emit bytes even if offset unknown (forward reference) */
-    if (as->pass == 1 || (offset >= -128 && offset <= 127)) {
-        emit_byte(as, 0x60 + get_cc_code(cc));
-        emit_byte(as, (uint8_t)offset);
-    } else {
+    /* Always emit 2 bytes to keep consistent size across passes */
+    emit_byte(as, 0x60 + get_cc_code(cc));
+    emit_byte(as, (uint8_t)offset);
+
+    /* Report error if offset is out of range (but only after pass 1) */
+    if (as->pass > 1 && (offset < -128 || offset > 127)) {
         error(as, "JR offset out of range (use JRL for longer jumps)");
         return false;
     }
