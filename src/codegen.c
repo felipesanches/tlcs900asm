@@ -113,6 +113,61 @@ static int get_cc_code(int64_t cc) {
     }
 }
 
+/* Get memory addressing mode code for compact encoding.
+ * This returns the mode byte that gets combined with the prefix (e.g., 0xA0).
+ * Returns:
+ *   0x00-0x07: (XWA)-(XSP) indirect
+ *   0x08-0x0F: (XWA+d8)-(XSP+d8) indexed with 8-bit displacement
+ *   0x10-0x17: (XWA+d16)-(XSP+d16) indexed with 16-bit displacement
+ *   0x30-0x37: (XWA+)-(XSP+) post-increment
+ *   0x28-0x2F: (-XWA)-(-XSP) pre-decrement
+ *   -1: unsupported mode
+ */
+static int get_compact_mem_mode(Operand *op) {
+    int code = get_reg32_code(op->reg);
+    if (code < 0) code = get_reg16_code(op->reg);
+    if (code < 0) return -1;
+
+    switch (op->mode) {
+        case ADDR_REGISTER_IND:
+            return code;  /* 0x00-0x07 */
+        case ADDR_REGISTER_IND_INC:
+            return 0x30 + code;  /* Post-increment */
+        case ADDR_REGISTER_IND_DEC:
+            return 0x28 + code;  /* Pre-decrement */
+        case ADDR_INDEXED:
+            if (op->index_reg != REG_NONE) {
+                return -1;  /* Register indexed not supported in compact form */
+            }
+            {
+                int disp = (int)op->value;
+                if (disp >= -128 && disp <= 127) {
+                    return 0x08 + code;  /* 8-bit displacement */
+                } else {
+                    return 0x10 + code;  /* 16-bit displacement */
+                }
+            }
+        default:
+            return -1;
+    }
+}
+
+/* Emit only the displacement bytes for compact encoding.
+ * Call this after emitting the combined prefix+mode byte.
+ */
+static bool emit_compact_mem_disp(Assembler *as, Operand *op) {
+    if (op->mode == ADDR_INDEXED && op->index_reg == REG_NONE) {
+        int disp = (int)op->value;
+        if (disp >= -128 && disp <= 127) {
+            emit_byte(as, (uint8_t)disp);
+        } else {
+            emit_word(as, (uint16_t)disp);
+        }
+    }
+    /* For indirect modes (no displacement), nothing to emit */
+    return true;
+}
+
 /* Emit memory operand encoding */
 static bool emit_mem_operand(Assembler *as, Operand *op) {
     switch (op->mode) {
@@ -645,7 +700,7 @@ static bool encode_jr(Assembler *as, Operand *ops, int count) {
     /* Report error if offset is out of range (but only after pass 1) */
     if (as->pass > 1 && (offset < -128 || offset > 127)) {
         error(as, "JR offset out of range (use JRL for longer jumps)");
-        return false;
+        /* Continue anyway - bytes were emitted, just warn the user */
     }
 
     return true;
@@ -2425,10 +2480,19 @@ static bool encode_cp(Assembler *as, Operand *ops, int count) {
             }
         } else if (dst->size == SIZE_LONG) {
             int code = get_reg32_code(dst->reg);
+            int mem_mode = get_compact_mem_mode(src);
             if (code >= 0) {
-                emit_byte(as, 0xA0);
-                emit_mem_operand(as, src);
-                emit_byte(as, 0x70 + code);
+                if (mem_mode >= 0) {
+                    /* Use compact encoding: A0+mode, displacement, F0+code */
+                    emit_byte(as, 0xA0 + mem_mode);
+                    emit_compact_mem_disp(as, src);
+                    emit_byte(as, 0xF0 + code);  /* Compact CP opcode */
+                } else {
+                    /* Fallback to standard encoding for complex addressing */
+                    emit_byte(as, 0xA0);
+                    emit_mem_operand(as, src);
+                    emit_byte(as, 0x70 + code);
+                }
                 return true;
             }
         }
@@ -2455,10 +2519,19 @@ static bool encode_cp(Assembler *as, Operand *ops, int count) {
             }
         } else if (src->size == SIZE_LONG) {
             int code = get_reg32_code(src->reg);
+            int mem_mode = get_compact_mem_mode(dst);
             if (code >= 0) {
-                emit_byte(as, 0xA0);
-                emit_mem_operand(as, dst);
-                emit_byte(as, 0x78 + code);
+                if (mem_mode >= 0) {
+                    /* Use compact encoding: A0+mode, displacement, F8+code */
+                    emit_byte(as, 0xA0 + mem_mode);
+                    emit_compact_mem_disp(as, dst);
+                    emit_byte(as, 0xF8 + code);  /* Compact CP (mem), reg opcode */
+                } else {
+                    /* Fallback to standard encoding for complex addressing */
+                    emit_byte(as, 0xA0);
+                    emit_mem_operand(as, dst);
+                    emit_byte(as, 0x78 + code);
+                }
                 return true;
             }
         }
