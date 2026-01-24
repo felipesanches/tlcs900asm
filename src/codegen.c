@@ -577,7 +577,9 @@ static bool encode_unlk(Assembler *as, Operand *ops, int count) {
 static bool encode_ret(Assembler *as, Operand *ops, int count) {
     /* Check for conditional return */
     if (count >= 1 && ops[0].mode == ADDR_CONDITION) {
-        emit_byte(as, 0xB0 + get_cc_code(ops[0].value));
+        /* RET cc uses 2-byte encoding: B0 followed by F0+cc */
+        emit_byte(as, 0xB0);
+        emit_byte(as, 0xF0 + get_cc_code(ops[0].value));
         return true;
     }
     emit_byte(as, 0x0E);
@@ -950,7 +952,7 @@ static bool encode_ld(Assembler *as, Operand *ops, int count) {
             int scode = get_reg16_code(src->reg);
             if (dcode >= 0 && scode >= 0) {
                 emit_byte(as, 0xD8 + scode);
-                emit_byte(as, 0x28 + dcode);
+                emit_byte(as, 0x88 + dcode);  /* LD rr, rr encoding */
                 return true;
             }
         } else if (dst->size == SIZE_LONG && src->size == SIZE_LONG) {
@@ -958,7 +960,7 @@ static bool encode_ld(Assembler *as, Operand *ops, int count) {
             int scode = get_reg32_code(src->reg);
             if (dcode >= 0 && scode >= 0) {
                 emit_byte(as, 0xE8 + scode);
-                emit_byte(as, 0x28 + dcode);
+                emit_byte(as, 0x88 + dcode);  /* LD xrr, xrr encoding */
                 return true;
             }
         }
@@ -1268,10 +1270,20 @@ static bool encode_ld(Assembler *as, Operand *ops, int count) {
     if ((dst->mode == ADDR_REGISTER_IND || dst->mode == ADDR_INDEXED ||
          dst->mode == ADDR_REGISTER_IND_INC || dst->mode == ADDR_REGISTER_IND_DEC) &&
         src->mode == ADDR_IMMEDIATE) {
-        emit_byte(as, 0x80);
-        emit_mem_operand(as, dst);
-        emit_byte(as, 0x00);
-        emit_byte(as, (uint8_t)src->value);
+        int mem_mode = get_compact_mem_mode(dst);
+        if (mem_mode >= 0) {
+            /* Use compact encoding: B0+mode, displacement, 00, imm8 */
+            emit_byte(as, 0xB0 + mem_mode);
+            emit_compact_mem_disp(as, dst);
+            emit_byte(as, 0x00);
+            emit_byte(as, (uint8_t)src->value);
+        } else {
+            /* Fallback to expanded encoding */
+            emit_byte(as, 0x80);
+            emit_mem_operand(as, dst);
+            emit_byte(as, 0x00);
+            emit_byte(as, (uint8_t)src->value);
+        }
         return true;
     }
 
@@ -1337,12 +1349,21 @@ static bool encode_lda(Assembler *as, Operand *ops, int count) {
         return true;
     }
 
-    /* LDA xrr, (mem) - register indirect, indexed, post-increment */
+    /* LDA xrr, (mem) - register indirect, indexed, post-increment, pre-decrement */
     if (src->mode == ADDR_REGISTER_IND || src->mode == ADDR_INDEXED ||
-        src->mode == ADDR_REGISTER_IND_INC) {
-        emit_byte(as, 0xF5);
-        emit_mem_operand(as, src);
-        emit_byte(as, 0x30 + dcode);
+        src->mode == ADDR_REGISTER_IND_INC || src->mode == ADDR_REGISTER_IND_DEC) {
+        int mem_mode = get_compact_mem_mode(src);
+        if (mem_mode >= 0) {
+            /* Use compact encoding: B0+mode, displacement, 30+dcode */
+            emit_byte(as, 0xB0 + mem_mode);
+            emit_compact_mem_disp(as, src);
+            emit_byte(as, 0x30 + dcode);
+        } else {
+            /* Fallback to standard encoding for complex addressing */
+            emit_byte(as, 0xF5);
+            emit_mem_operand(as, src);
+            emit_byte(as, 0x30 + dcode);
+        }
         return true;
     }
 
@@ -2459,25 +2480,40 @@ static bool encode_cp(Assembler *as, Operand *ops, int count) {
         if (dst->size == SIZE_BYTE) {
             int code = get_reg8_code(dst->reg);
             if (code >= 0) {
-                emit_byte(as, 0xC8 + code);  /* Use full register code */
-                emit_byte(as, 0xCF);  /* CP with immediate operation */
-                emit_byte(as, (uint8_t)src->value);
+                emit_byte(as, 0xC8 + code);
+                if (src->value == 0) {
+                    /* Short form: CP reg, 0 */
+                    emit_byte(as, 0xD8);
+                } else {
+                    emit_byte(as, 0xCF);  /* CP with immediate operation */
+                    emit_byte(as, (uint8_t)src->value);
+                }
                 return true;
             }
         } else if (dst->size == SIZE_WORD) {
             int code = get_reg16_code(dst->reg);
             if (code >= 0) {
                 emit_byte(as, 0xD8 + code);
-                emit_byte(as, 0xCF);  /* CP with immediate operation */
-                emit_word(as, (uint16_t)src->value);
+                if (src->value == 0) {
+                    /* Short form: CP reg, 0 */
+                    emit_byte(as, 0xD8);
+                } else {
+                    emit_byte(as, 0xCF);  /* CP with immediate operation */
+                    emit_word(as, (uint16_t)src->value);
+                }
                 return true;
             }
         } else if (dst->size == SIZE_LONG) {
             int code = get_reg32_code(dst->reg);
             if (code >= 0) {
                 emit_byte(as, 0xE8 + code);
-                emit_byte(as, 0xCF);  /* CP with immediate operation */
-                emit_long(as, (uint32_t)src->value);
+                if (src->value == 0) {
+                    /* Short form: CP reg, 0 */
+                    emit_byte(as, 0xD8);
+                } else {
+                    emit_byte(as, 0xCF);  /* CP with immediate operation */
+                    emit_long(as, (uint32_t)src->value);
+                }
                 return true;
             }
         }
@@ -2731,11 +2767,21 @@ static bool encode_inc(Assembler *as, Operand *ops, int count) {
     }
 
     /* INC (mem) - register indirect, indexed */
-    if (target->mode == ADDR_REGISTER_IND || target->mode == ADDR_INDEXED) {
-        emit_byte(as, 0x80);
-        emit_mem_operand(as, target);
-        emit_byte(as, 0x60);
-        emit_byte(as, (uint8_t)inc_val);
+    if (target->mode == ADDR_REGISTER_IND || target->mode == ADDR_INDEXED ||
+        target->mode == ADDR_REGISTER_IND_INC || target->mode == ADDR_REGISTER_IND_DEC) {
+        int mem_mode = get_compact_mem_mode(target);
+        if (mem_mode >= 0 && inc_val >= 1 && inc_val <= 8) {
+            /* Use compact encoding: 80+mode, displacement, 60+inc_val */
+            emit_byte(as, 0x80 + mem_mode);
+            emit_compact_mem_disp(as, target);
+            emit_byte(as, 0x60 + (inc_val & 7));  /* 0x60 for inc=8, 0x61-0x67 for inc=1-7 */
+        } else {
+            /* Fallback to standard encoding */
+            emit_byte(as, 0x80);
+            emit_mem_operand(as, target);
+            emit_byte(as, 0x60);
+            emit_byte(as, (uint8_t)inc_val);
+        }
         return true;
     }
 
@@ -2811,11 +2857,21 @@ static bool encode_dec(Assembler *as, Operand *ops, int count) {
     }
 
     /* DEC (mem) - register indirect, indexed */
-    if (target->mode == ADDR_REGISTER_IND || target->mode == ADDR_INDEXED) {
-        emit_byte(as, 0x80);
-        emit_mem_operand(as, target);
-        emit_byte(as, 0x68);
-        emit_byte(as, (uint8_t)dec_val);
+    if (target->mode == ADDR_REGISTER_IND || target->mode == ADDR_INDEXED ||
+        target->mode == ADDR_REGISTER_IND_INC || target->mode == ADDR_REGISTER_IND_DEC) {
+        int mem_mode = get_compact_mem_mode(target);
+        if (mem_mode >= 0 && dec_val >= 1 && dec_val <= 8) {
+            /* Use compact encoding: 80+mode, displacement, 68+dec_val */
+            emit_byte(as, 0x80 + mem_mode);
+            emit_compact_mem_disp(as, target);
+            emit_byte(as, 0x68 + (dec_val & 7));  /* 0x68 for dec=8, 0x69-0x6F for dec=1-7 */
+        } else {
+            /* Fallback to standard encoding */
+            emit_byte(as, 0x80);
+            emit_mem_operand(as, target);
+            emit_byte(as, 0x68);
+            emit_byte(as, (uint8_t)dec_val);
+        }
         return true;
     }
 
@@ -2849,11 +2905,21 @@ static bool encode_incw(Assembler *as, Operand *ops, int count) {
     }
 
     /* INCW (mem) - register indirect, indexed */
-    if (target->mode == ADDR_REGISTER_IND || target->mode == ADDR_INDEXED) {
-        emit_byte(as, 0x90);  /* Word memory prefix */
-        emit_mem_operand(as, target);
-        emit_byte(as, 0x60);
-        emit_byte(as, (uint8_t)inc_val);
+    if (target->mode == ADDR_REGISTER_IND || target->mode == ADDR_INDEXED ||
+        target->mode == ADDR_REGISTER_IND_INC || target->mode == ADDR_REGISTER_IND_DEC) {
+        int mem_mode = get_compact_mem_mode(target);
+        if (mem_mode >= 0 && inc_val >= 1 && inc_val <= 8) {
+            /* Use compact encoding: 90+mode, displacement, 60+inc_val */
+            emit_byte(as, 0x90 + mem_mode);
+            emit_compact_mem_disp(as, target);
+            emit_byte(as, 0x60 + (inc_val & 7));  /* 0x60 for inc=8, 0x61-0x67 for inc=1-7 */
+        } else {
+            /* Fallback to standard encoding */
+            emit_byte(as, 0x90);
+            emit_mem_operand(as, target);
+            emit_byte(as, 0x60);
+            emit_byte(as, (uint8_t)inc_val);
+        }
         return true;
     }
 
@@ -2887,11 +2953,21 @@ static bool encode_decw(Assembler *as, Operand *ops, int count) {
     }
 
     /* DECW (mem) - register indirect, indexed */
-    if (target->mode == ADDR_REGISTER_IND || target->mode == ADDR_INDEXED) {
-        emit_byte(as, 0x90);  /* Word memory prefix */
-        emit_mem_operand(as, target);
-        emit_byte(as, 0x68);
-        emit_byte(as, (uint8_t)dec_val);
+    if (target->mode == ADDR_REGISTER_IND || target->mode == ADDR_INDEXED ||
+        target->mode == ADDR_REGISTER_IND_INC || target->mode == ADDR_REGISTER_IND_DEC) {
+        int mem_mode = get_compact_mem_mode(target);
+        if (mem_mode >= 0 && dec_val >= 1 && dec_val <= 8) {
+            /* Use compact encoding: 90+mode, displacement, 68+dec_val */
+            emit_byte(as, 0x90 + mem_mode);
+            emit_compact_mem_disp(as, target);
+            emit_byte(as, 0x68 + (dec_val & 7));  /* 0x68 for dec=8, 0x69-0x6F for dec=1-7 */
+        } else {
+            /* Fallback to standard encoding */
+            emit_byte(as, 0x90);
+            emit_mem_operand(as, target);
+            emit_byte(as, 0x68);
+            emit_byte(as, (uint8_t)dec_val);
+        }
         return true;
     }
 
