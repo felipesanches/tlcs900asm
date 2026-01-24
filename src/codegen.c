@@ -1902,10 +1902,19 @@ static bool encode_add(Assembler *as, Operand *ops, int count) {
             }
         } else if (dst->size == SIZE_LONG) {
             int code = get_reg32_code(dst->reg);
+            int mem_mode = get_compact_mem_mode(src);
             if (code >= 0) {
-                emit_byte(as, 0xA0);
-                emit_mem_operand(as, src);
-                emit_byte(as, 0x00 + code);
+                if (mem_mode >= 0) {
+                    /* Use compact encoding: A0+mode, displacement, 80+code */
+                    emit_byte(as, 0xA0 + mem_mode);
+                    emit_compact_mem_disp(as, src);
+                    emit_byte(as, 0x80 + code);  /* Compact ADD opcode */
+                } else {
+                    /* Fallback to standard encoding for complex addressing */
+                    emit_byte(as, 0xA0);
+                    emit_mem_operand(as, src);
+                    emit_byte(as, 0x00 + code);
+                }
                 return true;
             }
         }
@@ -1913,6 +1922,7 @@ static bool encode_add(Assembler *as, Operand *ops, int count) {
 
     /* ADD (mem), reg */
     if ((dst->mode == ADDR_REGISTER_IND || dst->mode == ADDR_INDEXED ||
+         dst->mode == ADDR_REGISTER_IND_INC || dst->mode == ADDR_REGISTER_IND_DEC ||
          dst->mode == ADDR_DIRECT) && src->mode == ADDR_REGISTER) {
         if (src->size == SIZE_BYTE) {
             int code = get_reg8_code(src->reg);
@@ -1932,10 +1942,19 @@ static bool encode_add(Assembler *as, Operand *ops, int count) {
             }
         } else if (src->size == SIZE_LONG) {
             int code = get_reg32_code(src->reg);
+            int mem_mode = get_compact_mem_mode(dst);
             if (code >= 0) {
-                emit_byte(as, 0xA0);
-                emit_mem_operand(as, dst);
-                emit_byte(as, 0x08 + code);
+                if (mem_mode >= 0) {
+                    /* Use compact encoding: A0+mode, displacement, 88+code */
+                    emit_byte(as, 0xA0 + mem_mode);
+                    emit_compact_mem_disp(as, dst);
+                    emit_byte(as, 0x88 + code);  /* Compact ADD (mem), reg opcode */
+                } else {
+                    /* Fallback to standard encoding for complex addressing */
+                    emit_byte(as, 0xA0);
+                    emit_mem_operand(as, dst);
+                    emit_byte(as, 0x08 + code);
+                }
                 return true;
             }
         }
@@ -2018,6 +2037,7 @@ static bool encode_adc(Assembler *as, Operand *ops, int count) {
     /* ADC reg, (mem) */
     if (dst->mode == ADDR_REGISTER &&
         (src->mode == ADDR_REGISTER_IND || src->mode == ADDR_INDEXED ||
+         src->mode == ADDR_REGISTER_IND_INC || src->mode == ADDR_REGISTER_IND_DEC ||
          src->mode == ADDR_DIRECT)) {
         if (dst->size == SIZE_BYTE) {
             int code = get_reg8_code(dst->reg);
@@ -2037,10 +2057,19 @@ static bool encode_adc(Assembler *as, Operand *ops, int count) {
             }
         } else if (dst->size == SIZE_LONG) {
             int code = get_reg32_code(dst->reg);
+            int mem_mode = get_compact_mem_mode(src);
             if (code >= 0) {
-                emit_byte(as, 0xA0);
-                emit_mem_operand(as, src);
-                emit_byte(as, 0x10 + code);
+                if (mem_mode >= 0) {
+                    /* Use compact encoding: A0+mode, displacement, 90+code */
+                    emit_byte(as, 0xA0 + mem_mode);
+                    emit_compact_mem_disp(as, src);
+                    emit_byte(as, 0x90 + code);  /* Compact ADC reg,(mem) opcode */
+                } else {
+                    /* Fallback to standard encoding for complex addressing */
+                    emit_byte(as, 0xA0);
+                    emit_mem_operand(as, src);
+                    emit_byte(as, 0x10 + code);
+                }
                 return true;
             }
         }
@@ -2048,6 +2077,7 @@ static bool encode_adc(Assembler *as, Operand *ops, int count) {
 
     /* ADC (mem), reg */
     if ((dst->mode == ADDR_REGISTER_IND || dst->mode == ADDR_INDEXED ||
+         dst->mode == ADDR_REGISTER_IND_INC || dst->mode == ADDR_REGISTER_IND_DEC ||
          dst->mode == ADDR_DIRECT) && src->mode == ADDR_REGISTER) {
         if (src->size == SIZE_BYTE) {
             int code = get_reg8_code(src->reg);
@@ -2067,10 +2097,19 @@ static bool encode_adc(Assembler *as, Operand *ops, int count) {
             }
         } else if (src->size == SIZE_LONG) {
             int code = get_reg32_code(src->reg);
+            int mem_mode = get_compact_mem_mode(dst);
             if (code >= 0) {
-                emit_byte(as, 0xA0);
-                emit_mem_operand(as, dst);
-                emit_byte(as, 0x18 + code);
+                if (mem_mode >= 0) {
+                    /* Use compact encoding: A0+mode, displacement, 98+code */
+                    emit_byte(as, 0xA0 + mem_mode);
+                    emit_compact_mem_disp(as, dst);
+                    emit_byte(as, 0x98 + code);  /* Compact ADC (mem),reg opcode */
+                } else {
+                    /* Fallback to standard encoding for complex addressing */
+                    emit_byte(as, 0xA0);
+                    emit_mem_operand(as, dst);
+                    emit_byte(as, 0x18 + code);
+                }
                 return true;
             }
         }
@@ -2176,7 +2215,8 @@ static bool encode_sub(Assembler *as, Operand *ops, int count) {
 
     /* SUB reg, (mem) - register indirect, indexed */
     if (dst->mode == ADDR_REGISTER &&
-        (src->mode == ADDR_REGISTER_IND || src->mode == ADDR_INDEXED)) {
+        (src->mode == ADDR_REGISTER_IND || src->mode == ADDR_INDEXED ||
+         src->mode == ADDR_REGISTER_IND_INC || src->mode == ADDR_REGISTER_IND_DEC)) {
         if (dst->size == SIZE_BYTE) {
             int code = get_reg8_code(dst->reg);
             if (code >= 0) {
@@ -2195,10 +2235,19 @@ static bool encode_sub(Assembler *as, Operand *ops, int count) {
             }
         } else if (dst->size == SIZE_LONG) {
             int code = get_reg32_code(dst->reg);
+            int mem_mode = get_compact_mem_mode(src);
             if (code >= 0) {
-                emit_byte(as, 0xA0);
-                emit_mem_operand(as, src);
-                emit_byte(as, 0x20 + code);
+                if (mem_mode >= 0) {
+                    /* Use compact encoding: A0+mode, displacement, A0+code */
+                    emit_byte(as, 0xA0 + mem_mode);
+                    emit_compact_mem_disp(as, src);
+                    emit_byte(as, 0xA0 + code);  /* Compact SUB opcode */
+                } else {
+                    /* Fallback to standard encoding for complex addressing */
+                    emit_byte(as, 0xA0);
+                    emit_mem_operand(as, src);
+                    emit_byte(as, 0x20 + code);
+                }
                 return true;
             }
         }
@@ -2206,6 +2255,7 @@ static bool encode_sub(Assembler *as, Operand *ops, int count) {
 
     /* SUB (mem), reg */
     if ((dst->mode == ADDR_REGISTER_IND || dst->mode == ADDR_INDEXED ||
+         dst->mode == ADDR_REGISTER_IND_INC || dst->mode == ADDR_REGISTER_IND_DEC ||
          dst->mode == ADDR_DIRECT) && src->mode == ADDR_REGISTER) {
         if (src->size == SIZE_BYTE) {
             int code = get_reg8_code(src->reg);
@@ -2225,10 +2275,19 @@ static bool encode_sub(Assembler *as, Operand *ops, int count) {
             }
         } else if (src->size == SIZE_LONG) {
             int code = get_reg32_code(src->reg);
+            int mem_mode = get_compact_mem_mode(dst);
             if (code >= 0) {
-                emit_byte(as, 0xA0);
-                emit_mem_operand(as, dst);
-                emit_byte(as, 0x28 + code);
+                if (mem_mode >= 0) {
+                    /* Use compact encoding: A0+mode, displacement, A8+code */
+                    emit_byte(as, 0xA0 + mem_mode);
+                    emit_compact_mem_disp(as, dst);
+                    emit_byte(as, 0xA8 + code);  /* Compact SUB (mem), reg opcode */
+                } else {
+                    /* Fallback to standard encoding for complex addressing */
+                    emit_byte(as, 0xA0);
+                    emit_mem_operand(as, dst);
+                    emit_byte(as, 0x28 + code);
+                }
                 return true;
             }
         }
@@ -2303,6 +2362,7 @@ static bool encode_sbc(Assembler *as, Operand *ops, int count) {
     /* SBC reg, (mem) */
     if (dst->mode == ADDR_REGISTER &&
         (src->mode == ADDR_REGISTER_IND || src->mode == ADDR_INDEXED ||
+         src->mode == ADDR_REGISTER_IND_INC || src->mode == ADDR_REGISTER_IND_DEC ||
          src->mode == ADDR_DIRECT)) {
         if (dst->size == SIZE_BYTE) {
             int code = get_reg8_code(dst->reg);
@@ -2322,10 +2382,19 @@ static bool encode_sbc(Assembler *as, Operand *ops, int count) {
             }
         } else if (dst->size == SIZE_LONG) {
             int code = get_reg32_code(dst->reg);
+            int mem_mode = get_compact_mem_mode(src);
             if (code >= 0) {
-                emit_byte(as, 0xA0);
-                emit_mem_operand(as, src);
-                emit_byte(as, 0x30 + code);
+                if (mem_mode >= 0) {
+                    /* Use compact encoding: A0+mode, displacement, B0+code */
+                    emit_byte(as, 0xA0 + mem_mode);
+                    emit_compact_mem_disp(as, src);
+                    emit_byte(as, 0xB0 + code);  /* Compact SBC reg,(mem) opcode */
+                } else {
+                    /* Fallback to standard encoding for complex addressing */
+                    emit_byte(as, 0xA0);
+                    emit_mem_operand(as, src);
+                    emit_byte(as, 0x30 + code);
+                }
                 return true;
             }
         }
@@ -2333,6 +2402,7 @@ static bool encode_sbc(Assembler *as, Operand *ops, int count) {
 
     /* SBC (mem), reg */
     if ((dst->mode == ADDR_REGISTER_IND || dst->mode == ADDR_INDEXED ||
+         dst->mode == ADDR_REGISTER_IND_INC || dst->mode == ADDR_REGISTER_IND_DEC ||
          dst->mode == ADDR_DIRECT) && src->mode == ADDR_REGISTER) {
         if (src->size == SIZE_BYTE) {
             int code = get_reg8_code(src->reg);
@@ -2352,10 +2422,19 @@ static bool encode_sbc(Assembler *as, Operand *ops, int count) {
             }
         } else if (src->size == SIZE_LONG) {
             int code = get_reg32_code(src->reg);
+            int mem_mode = get_compact_mem_mode(dst);
             if (code >= 0) {
-                emit_byte(as, 0xA0);
-                emit_mem_operand(as, dst);
-                emit_byte(as, 0x38 + code);
+                if (mem_mode >= 0) {
+                    /* Use compact encoding: A0+mode, displacement, B8+code */
+                    emit_byte(as, 0xA0 + mem_mode);
+                    emit_compact_mem_disp(as, dst);
+                    emit_byte(as, 0xB8 + code);  /* Compact SBC (mem),reg opcode */
+                } else {
+                    /* Fallback to standard encoding for complex addressing */
+                    emit_byte(as, 0xA0);
+                    emit_mem_operand(as, dst);
+                    emit_byte(as, 0x38 + code);
+                }
                 return true;
             }
         }
