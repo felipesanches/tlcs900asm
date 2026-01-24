@@ -816,7 +816,7 @@ static bool encode_calr(Assembler *as, Operand *ops, int count) {
     }
 
     int64_t offset = ops[0].value - (as->pc + 3);
-    emit_byte(as, 0x1D);
+    emit_byte(as, 0x1E);  /* CALR opcode (verified against original ROM) */
     emit_word(as, (uint16_t)offset);
 
     return true;
