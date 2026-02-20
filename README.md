@@ -109,4 +109,4 @@ Source files:
 
 ## License
 
-This project is part of the KN5000 reverse engineering effort.
+This project is released into the public domain. See the [LICENSE](LICENSE) file for details.
