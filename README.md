@@ -2,7 +2,9 @@
 
 This project is released into the public domain. See the [LICENSE](LICENSE) file for details.
 
-A two-pass assembler for the Toshiba TLCS-900/TMP94C241 CPU, designed as a drop-in replacement for ASL (Alfred's Macro Assembler) for assembling KN5000 subcpu firmware.
+A two-pass assembler for the Toshiba TLCS-900/TMP94C241 CPU, designed as a drop-in replacement for ASL (Alfred's Macro Assembler) for [assembling KN5000 ROMs](https://github.com/ArqueologiaDigital/kn5000-roms-disasm).
+
+This was created while working on http://arqueologiadigital.org/KN5000-docs/ and https://felipesanches.github.io/kn5000-anotherworld/
 
 ## Building
 
