@@ -1,5 +1,7 @@
 # TLCS-900 Assembler
 
+This project is released into the public domain. See the [LICENSE](LICENSE) file for details.
+
 A two-pass assembler for the Toshiba TLCS-900/TMP94C241 CPU, designed as a drop-in replacement for ASL (Alfred's Macro Assembler) for assembling KN5000 subcpu firmware.
 
 ## Building
@@ -109,4 +111,4 @@ Source files:
 
 ## License
 
-This project is released into the public domain. See the [LICENSE](LICENSE) file for details.
+See the [LICENSE](LICENSE) file for details.
